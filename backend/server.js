@@ -86,16 +86,32 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   res.json(result.rows);
 });
 
-// Admin Delete User
+// Admin Delete User (With Cascade Clean-up)
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).send('Admin only');
+  
+  const userId = req.params.id;
+
   try {
-    // Cascade delete: entries first, then projects, then user
-    await pool.query('DELETE FROM time_entries WHERE user_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM projects WHERE created_by = $1', [req.params.id]);
-    await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+    // 1. Delete all time entries created by this user
+    await pool.query('DELETE FROM time_entries WHERE user_id = $1', [userId]);
+
+    // 2. Handle Projects created by this user
+    // Option A: Delete them (Aggressive)
+    // await pool.query('DELETE FROM projects WHERE created_by = $1', [userId]);
+    
+    // Option B: Reassign them to the Admin deleting the user (Safe)
+    // This prevents other team members from losing access to projects the deleted user made.
+    await pool.query('UPDATE projects SET created_by = $1 WHERE created_by = $2', [req.user.id, userId]);
+
+    // 3. Finally, delete the user
+    await pool.query('DELETE FROM users WHERE id = $1', [userId]);
+    
     res.json({ success: true });
-  } catch (err) { res.status(500).send(err.message); }
+  } catch (err) {
+    console.error("Delete User Error:", err);
+    res.status(500).send(err.message);
+  }
 });
 
 // Update Role (Admin)

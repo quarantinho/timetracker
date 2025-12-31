@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// SECRET KEY (In production, use process.env.JWT_SECRET)
+// SECRET KEY
 const JWT_SECRET = 'super-secret-key-change-this-later';
 
 // DATABASE CONNECTION
@@ -34,15 +34,11 @@ const authenticateToken = (req, res, next) => {
 };
 
 // --- AUTH ROUTES ---
-
 app.post('/api/auth/register', async (req, res) => {
   const { name, email, password } = req.body;
   try {
     const hashedPass = await bcrypt.hash(password, 10);
-    const result = await pool.query(
-      'INSERT INTO users (name, email, password, avatar) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role, avatar',
-      [name, email, hashedPass, '👤']
-    );
+    const result = await pool.query('INSERT INTO users (name, email, password, avatar) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role, avatar', [name, email, hashedPass, '👤']);
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(400).send('Email already exists');
@@ -55,36 +51,25 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = result.rows[0];
-    
-    if (!user) return res.status(400).send('User not found');
-    const validPass = await bcrypt.compare(password, user.password);
-    if (!validPass) return res.status(403).send('Invalid password');
-
+    if (!user || !(await bcrypt.compare(password, user.password))) return res.status(403).send('Invalid credentials');
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar } });
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// --- USER & ROLE ROUTES ---
-
+// --- DATA ROUTES ---
 app.get('/api/users', authenticateToken, async (req, res) => {
   const result = await pool.query('SELECT id, name, email, role, avatar FROM users');
   res.json(result.rows);
 });
 
-// Update Role (Admin Only)
 app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).send('Only admins can change roles');
+  if (req.user.role !== 'admin') return res.status(403).send('Admin only');
   try {
-    const result = await pool.query(
-      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, name, email, role',
-      [req.body.role, req.params.id]
-    );
+    const result = await pool.query('UPDATE users SET role = $1 WHERE id = $2 RETURNING id, name, email, role', [req.body.role, req.params.id]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
 });
-
-// --- PROJECT ROUTES ---
 
 app.get('/api/projects', authenticateToken, async (req, res) => {
   const result = await pool.query('SELECT * FROM projects ORDER BY id');
@@ -92,26 +77,19 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/projects', authenticateToken, async (req, res) => {
-  const { name, color } = req.body;
   try {
-    const result = await pool.query('INSERT INTO projects (name, color, created_by) VALUES ($1, $2, $3) RETURNING *', [name, color, req.user.id]);
+    const result = await pool.query('INSERT INTO projects (name, color, created_by) VALUES ($1, $2, $3) RETURNING *', [req.body.name, req.body.color, req.user.id]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// Edit Project
 app.put('/api/projects/:id', authenticateToken, async (req, res) => {
-  const { name, color } = req.body;
   try {
-    const result = await pool.query(
-      'UPDATE projects SET name = $1, color = $2 WHERE id = $3 RETURNING *',
-      [name, color, req.params.id]
-    );
+    const result = await pool.query('UPDATE projects SET name = $1, color = $2 WHERE id = $3 RETURNING *', [req.body.name, req.body.color, req.params.id]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// Delete Project (Cascades to delete entries first)
 app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
   try {
     await pool.query('DELETE FROM time_entries WHERE project_id = $1', [req.params.id]);
@@ -120,18 +98,9 @@ app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// --- TIME ENTRY ROUTES ---
-
 app.get('/api/entries', authenticateToken, async (req, res) => {
-  // Only get entries for the logged-in user
   try {
-    const result = await pool.query(`
-      SELECT te.*, p.name as project_name, p.color 
-      FROM time_entries te
-      JOIN projects p ON te.project_id = p.id
-      WHERE te.user_id = $1 AND te.end_time IS NOT NULL
-      ORDER BY te.start_time DESC LIMIT 50
-    `, [req.user.id]);
+    const result = await pool.query(`SELECT te.*, p.name as project_name, p.color FROM time_entries te JOIN projects p ON te.project_id = p.id WHERE te.user_id = $1 AND te.end_time IS NOT NULL ORDER BY te.start_time DESC LIMIT 50`, [req.user.id]);
     res.json(result.rows);
   } catch (err) { res.status(500).send(err.message); }
 });
@@ -152,13 +121,11 @@ app.post('/api/entries/start', authenticateToken, async (req, res) => {
 
 app.post('/api/entries/stop', authenticateToken, async (req, res) => {
   try {
-    const activeTimer = await pool.query('SELECT id, start_time FROM time_entries WHERE user_id = $1 AND end_time IS NULL', [req.user.id]);
-    if (activeTimer.rows.length === 0) return res.status(400).send('No timer');
-    
-    const entry = activeTimer.rows[0];
+    const active = await pool.query('SELECT id, start_time FROM time_entries WHERE user_id = $1 AND end_time IS NULL', [req.user.id]);
+    if (active.rows.length === 0) return res.status(400).send('No timer');
+    const entry = active.rows[0];
     const endTime = new Date();
     const duration = Math.floor((endTime - new Date(entry.start_time)) / 1000);
-    
     const result = await pool.query('UPDATE time_entries SET end_time = $1, duration_seconds = $2 WHERE id = $3 RETURNING *', [endTime, duration, entry.id]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
@@ -166,31 +133,24 @@ app.post('/api/entries/stop', authenticateToken, async (req, res) => {
 
 app.post('/api/entries/manual', authenticateToken, async (req, res) => {
   const { projectId, start, end } = req.body;
-  const startTime = new Date(start);
-  const endTime = new Date(end);
-  const duration = Math.floor((endTime - startTime) / 1000);
+  const s = new Date(start); const e = new Date(end);
+  const dur = Math.floor((e - s) / 1000);
   try {
-    const result = await pool.query('INSERT INTO time_entries (user_id, project_id, start_time, end_time, duration_seconds) VALUES ($1, $2, $3, $4, $5) RETURNING *', [req.user.id, projectId, startTime, endTime, duration]);
+    const result = await pool.query('INSERT INTO time_entries (user_id, project_id, start_time, end_time, duration_seconds) VALUES ($1, $2, $3, $4, $5) RETURNING *', [req.user.id, projectId, s, e, dur]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// Edit Entry
 app.put('/api/entries/:id', authenticateToken, async (req, res) => {
   const { projectId, start, end } = req.body;
-  const startTime = new Date(start);
-  const endTime = new Date(end);
-  const duration = Math.floor((endTime - startTime) / 1000);
+  const s = new Date(start); const e = new Date(end);
+  const dur = Math.floor((e - s) / 1000);
   try {
-    const result = await pool.query(
-      'UPDATE time_entries SET project_id = $1, start_time = $2, end_time = $3, duration_seconds = $4 WHERE id = $5 RETURNING *',
-      [projectId, startTime, endTime, duration, req.params.id]
-    );
+    const result = await pool.query('UPDATE time_entries SET project_id = $1, start_time = $2, end_time = $3, duration_seconds = $4 WHERE id = $5 RETURNING *', [projectId, s, e, dur, req.params.id]);
     res.json(result.rows[0]);
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// Delete Entry
 app.delete('/api/entries/:id', authenticateToken, async (req, res) => {
   try {
     await pool.query('DELETE FROM time_entries WHERE id = $1', [req.params.id]);
@@ -198,23 +158,38 @@ app.delete('/api/entries/:id', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// --- ANALYTICS (Admin Only) ---
-
+// --- ANALYTICS (With Filters) ---
 app.get('/api/analytics', authenticateToken, async (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).send('Only admins can view analytics');
+  if (req.user.role !== 'admin') return res.status(403).send('Admin only');
+  
+  const { start, end, projectIds } = req.query;
+  
+  let query = `
+    SELECT u.id as user_id, u.name as user_name, p.id as project_id, p.name as project_name, p.color,
+    ROUND(SUM(EXTRACT(EPOCH FROM (te.end_time - te.start_time)) / 3600)::numeric, 2) as hours
+    FROM time_entries te
+    JOIN projects p ON te.project_id = p.id
+    JOIN users u ON te.user_id = u.id
+    WHERE te.end_time IS NOT NULL
+  `;
+  
+  const params = [];
+  let paramIdx = 1;
+
+  if (start) { query += ` AND te.start_time >= $${paramIdx++}`; params.push(start); }
+  if (end) { query += ` AND te.start_time < ($${paramIdx++}::date + 1)`; params.push(end); }
+  if (projectIds) {
+    const ids = projectIds.split(',').map(id => parseInt(id)).filter(n => !isNaN(n));
+    if (ids.length > 0) { query += ` AND p.id = ANY($${paramIdx++}::int[])`; params.push(ids); }
+  }
+
+  query += ` GROUP BY u.id, u.name, p.id, p.name, p.color`;
+  
   try {
-    const result = await pool.query(`
-      SELECT u.id as user_id, u.name as user_name, p.id as project_id, p.name as project_name, p.color,
-      ROUND(SUM(EXTRACT(EPOCH FROM (te.end_time - te.start_time)) / 3600)::numeric, 2) as hours
-      FROM time_entries te
-      JOIN projects p ON te.project_id = p.id
-      JOIN users u ON te.user_id = u.id
-      WHERE te.end_time IS NOT NULL
-      GROUP BY u.id, u.name, p.id, p.name, p.color
-    `);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) { res.status(500).send(err.message); }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Secure Backend running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));

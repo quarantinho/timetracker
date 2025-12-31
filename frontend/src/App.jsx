@@ -82,8 +82,28 @@ const GlobalStyles = () => (
     .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
     .glass-input { background: #f8fafc; border: 1px solid #e2e8f0; transition: all 0.2s; }
     .glass-input:focus { background: #fff; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
-    .chart-grid-row { display: grid; grid-template-columns: 220px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 12px; }
-    .chart-sub-row { display: grid; grid-template-columns: 200px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 8px; margin-left: 20px; opacity: 0.8; font-size: 0.85rem; }
+    
+    /* THE FIX: Strict Grid Columns */
+    .chart-grid-row { 
+      display: grid; 
+      grid-template-columns: 200px 1fr 80px; 
+      align-items: center; 
+      gap: 16px; 
+      margin-bottom: 12px;
+      min-width: 0; /* Prevents flex/grid collapse */
+    }
+    
+    .chart-sub-row { 
+      display: grid; 
+      grid-template-columns: 180px 1fr 80px; 
+      align-items: center; 
+      gap: 16px; 
+      margin-bottom: 8px; 
+      margin-left: 20px; 
+      opacity: 0.8; 
+      font-size: 0.85rem; 
+    }
+    
     .toast-anim { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   `}</style>
@@ -160,7 +180,6 @@ function AppContent() {
 
   const showToast = (msg, type = 'success') => setToast({ message: msg, type });
 
-  // Fetch Global Data (Projects & Tasks)
   const refreshProjects = async () => {
     const res = await authFetch('/projects');
     if (res.ok) {
@@ -290,8 +309,8 @@ function NavItem({ icon, label, isActive, onClick }) { return <button onClick={o
 function MainContent({ user, setUser, view, activeTimer, onTimerUpdate, showToast, projectsData, refreshProjects }) {
   const [trigger, setTrigger] = useState(0); const update = () => setTrigger(t => t + 1);
   return (
-    <main className="flex-1 p-8 overflow-y-auto bg-slate-100">
-      <h2 className="text-3xl font-bold text-slate-900 mb-8 capitalize">{view}</h2>
+    <main className="flex-1 p-8 md:p-12 overflow-y-auto bg-slate-100/50">
+      <header className="mb-8"><h2 className="text-3xl font-extrabold text-slate-900 tracking-tight capitalize">{view === 'analytics' ? 'Dashboard' : view}</h2></header>
       {view === 'tracker' && <div className="max-w-6xl space-y-8"><TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update} showToast={showToast} projectsData={projectsData} /><div className="grid grid-cols-1 lg:grid-cols-3 gap-8"><div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update} showToast={showToast} projectsData={projectsData} /></div><div><ManualEntryCard onUpdate={update} showToast={showToast} projectsData={projectsData} /></div></div></div>}
       {view === 'settings' && <SettingsView user={user} showToast={showToast} onUpdate={(u) => { setUser({...user, ...u}); localStorage.setItem('timeapp_user', JSON.stringify({...user, ...u})); }} />}
       {view === 'analytics' && user.role === 'admin' && <AnalyticsView trigger={trigger} projectsData={projectsData} />}
@@ -318,7 +337,6 @@ function SettingsView({ user, onUpdate, showToast }) {
     e.preventDefault();
     if (passwords.new !== passwords.confirm) return showToast('New passwords do not match!', 'error');
     if (passwords.new.length < 6) return showToast('Password must be at least 6 chars', 'error');
-    
     const res = await authFetch('/users/password', { method: 'PUT', body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new }) });
     if (res.ok) { showToast('Password changed successfully!'); setPasswords({ current: '', new: '', confirm: '' }); } 
     else showToast('Current password incorrect', 'error');
@@ -336,7 +354,6 @@ function SettingsView({ user, onUpdate, showToast }) {
           <button className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-200">Save Changes</button>
         </form>
       </div>
-
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="text-xl font-bold text-slate-800 mb-6 flex gap-2"><Lock className="text-indigo-600"/> Change Password</h3>
         <form onSubmit={handlePasswordUpdate} className="space-y-4">
@@ -398,13 +415,12 @@ function TeamView({ currentUser, showToast }) {
           </tbody>
         </table>
       </div>
-      <ConfirmModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} title="Delete User" message="Are you sure? This will delete the user and all their tracked time entries permanently. Projects they created will be transferred to you." />
+      <ConfirmModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} title="Delete User" message="Are you sure? This will delete the user and all their tracked time entries permanently." />
     </>
   );
 }
 
-// --- SUB-VIEWS (Analytics, Projects, Tracker) ---
-
+// --- ANALYTICS VIEW ---
 function AnalyticsView({ trigger }) {
   const [data, setData] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -424,27 +440,20 @@ function AnalyticsView({ trigger }) {
 
   useEffect(() => {
     let query = '?';
-    try {
-      if (viewMode === 'month') {
-        const y = currentDate.getFullYear(), m = currentDate.getMonth();
-        query += `start=${toLocalISOString(new Date(y, m, 1))}&end=${toLocalISOString(new Date(y, m + 1, 0))}&`;
-      } else if (viewMode === 'year') {
-        const y = currentDate.getFullYear();
-        query += `start=${toLocalISOString(new Date(y, 0, 1))}&end=${toLocalISOString(new Date(y, 11, 31))}&`;
-      }
-      if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
-      
-      authFetch(`/analytics${query}`).then(r => r.json()).then(d => {
-        if (Array.isArray(d)) setData(d);
-        else setData([]); 
-      });
-    } catch (e) { console.error("Analytics fetch error", e); setData([]); }
+    if (viewMode === 'month') {
+      const y = currentDate.getFullYear(), m = currentDate.getMonth();
+      query += `start=${toLocalISOString(new Date(y, m, 1))}&end=${toLocalISOString(new Date(y, m + 1, 0))}&`;
+    } else if (viewMode === 'year') {
+      const y = currentDate.getFullYear();
+      query += `start=${toLocalISOString(new Date(y, 0, 1))}&end=${toLocalISOString(new Date(y, 11, 31))}&`;
+    }
+    if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
+    authFetch(`/analytics${query}`).then(r => r.json()).then(d => Array.isArray(d) ? setData(d) : setData([]));
   }, [trigger, viewMode, currentDate, selectedProjects]);
 
   const shiftDate = (amount) => {
     const newDate = new Date(currentDate);
-    if (viewMode === 'month') newDate.setMonth(newDate.getMonth() + amount);
-    else newDate.setFullYear(newDate.getFullYear() + amount);
+    if (viewMode === 'month') newDate.setMonth(newDate.getMonth() + amount); else newDate.setFullYear(newDate.getFullYear() + amount);
     setCurrentDate(newDate);
   };
 
@@ -455,27 +464,34 @@ function AnalyticsView({ trigger }) {
 
   const processedData = useMemo(() => {
     const map = {};
-    
     data.forEach(item => {
       const pName = item.project_name || 'Unknown';
       if (!map[pName]) map[pName] = { name: pName, total: 0, users: {}, tasks: {} };
-      
       const hours = Number(item.hours) || 0;
       map[pName].total += hours;
-      
-      // User total for project
       map[pName].users[item.user_name] = (map[pName].users[item.user_name] || 0) + hours;
-
-      // Task breakdown
       const tName = item.task_name || '(No Task)';
       if (!map[pName].tasks[tName]) map[pName].tasks[tName] = { total: 0, users: {} };
       map[pName].tasks[tName].total += hours;
       map[pName].tasks[tName].users[item.user_name] = (map[pName].tasks[tName].users[item.user_name] || 0) + hours;
     });
-
     const chartData = Object.values(map).sort((a,b) => b.total - a.total);
     const globalMax = Math.max(...chartData.map(d => d.total), 1);
     return { chartData, globalMax };
+  }, [data]);
+
+  const userData = useMemo(() => {
+    if (!data.length) return {};
+    const map = {};
+    data.forEach(item => { 
+      if (!map[item.user_name]) map[item.user_name] = []; 
+      map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) || 0 }); 
+    });
+    Object.keys(map).forEach(u => {
+      map[u].sort((a,b) => b.hours - a.hours);
+      map[u].max = Math.max(...map[u].map(x => x.hours), 1);
+    });
+    return map;
   }, [data]);
 
   return (
@@ -503,7 +519,6 @@ function AnalyticsView({ trigger }) {
           <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${isFilterOpen || selectedProjects.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
             <Filter size={16}/> Filter {selectedProjects.length > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[10px]">{selectedProjects.length}</span>} <ChevronDown size={14}/>
           </button>
-          
           {isFilterOpen && (
             <div className="absolute right-0 top-14 bg-white p-3 rounded-2xl shadow-xl border border-slate-100 w-72 z-[100] animate-in fade-in slide-in-from-top-2">
                <div className="text-xs font-bold text-slate-400 uppercase mb-2 px-2">Select Projects</div>
@@ -551,9 +566,9 @@ function AnalyticsView({ trigger }) {
                       {Object.entries(p.tasks).map(([tName, tData]) => (
                         <div key={tName} className="chart-sub-row">
                           <div className="flex justify-end pr-2"><CornerDownRight size={14} className="text-slate-300"/></div>
-                          <div className="text-xs font-medium text-slate-500 truncate">{tName}</div>
+                          <div className="text-xs font-medium text-slate-500 truncate pl-2">{tName}</div>
                           <div className="h-2 bg-slate-200 rounded-full overflow-hidden w-full">
-                            <div className="h-full flex" style={{ width: `${(tData.total / p.total) * 100}%` }}> {/* Relative to Project Total */}
+                            <div className="h-full flex" style={{ width: `${(tData.total / p.total) * 100}%` }}>
                                {Object.entries(tData.users).map(([u, h]) => (
                                  <div key={u} style={{width: `${(h/tData.total)*100}%`, backgroundColor: stringToColor(u)}} className="h-full" title={`${u}: ${h.toFixed(1)}h`}></div>
                                ))}
@@ -571,6 +586,31 @@ function AnalyticsView({ trigger }) {
           </div>
         )}
       </div>
+
+      <div className="space-y-6">
+         <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
+         {Object.entries(userData).map(([userName, entries]) => (
+            <div key={userName} className="glass-panel p-8 rounded-3xl hover:shadow-lg transition-all">
+               <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-4">
+                  <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><User size={20}/></div>
+                  <h4 className="font-bold text-lg text-slate-700">{userName}</h4>
+                  <div className="ml-auto font-mono font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-lg text-sm">Total: {entries.reduce((a,b)=>a+b.hours,0).toFixed(1)}h</div>
+               </div>
+               <div className="space-y-2">
+                  {entries.map(e => (
+                    <div key={e.project} className="chart-grid-row">
+                       <div></div>
+                       <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
+                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
+                          <div style={{width: `${Math.min(100, (e.hours / userData[userName].max) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
+                       </div>
+                       <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+         ))}
+      </div>
     </div>
   );
 }
@@ -579,8 +619,6 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast,
   const [proj, setProj] = useState(''); 
   const [task, setTask] = useState('');
   const [elapsed, setElapsed] = useState(0);
-
-  // Filter tasks based on selected project
   const availableTasks = projectsData.tasks.filter(t => t.project_id === parseInt(proj));
 
   useEffect(() => { 
@@ -597,9 +635,7 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast,
   const toggle = async () => { 
     if (activeTimer) { 
       await authFetch('/entries/stop', { method: 'POST' }); 
-      onTimerUpdate(null); 
-      onDataRefresh(); 
-      showToast("Timer Stopped"); 
+      onTimerUpdate(null); onDataRefresh(); showToast("Timer Stopped"); 
     } else { 
       if(!proj) return alert('Select project'); 
       const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: proj, taskId: task }) }); 
@@ -625,9 +661,7 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast,
         </div>
       </div>
       <div className="font-mono text-3xl font-bold text-slate-700 w-32 text-center tabular-nums hidden md:block">{formatDuration(elapsed)}</div>
-      <button onClick={toggle} className={`w-full md:w-auto p-4 px-10 rounded-xl text-white font-extrabold shadow-xl flex items-center justify-center gap-3 transition-all hover:scale-105 active:scale-95 ${activeTimer ? 'bg-red-500 hover:bg-red-600 shadow-red-500/30' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'}`}>
-        {activeTimer ? <><Square fill="currentColor" size={20}/> STOP</> : <><Play fill="currentColor" size={20}/> START</>}
-      </button>
+      <button onClick={toggle} className={`w-full md:w-auto p-4 px-10 rounded-xl text-white font-extrabold shadow-xl ${activeTimer ? 'bg-red-500' : 'bg-indigo-600'}`}>{activeTimer ? 'STOP' : 'START'}</button>
     </div>
   );
 }
@@ -637,62 +671,41 @@ function HistoryList({ trigger, onUpdate, showToast, projectsData }) {
   const [editingEntry, setEditingEntry] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
 
-  useEffect(() => { 
-    authFetch('/entries')
-      .then(r=>r.json())
-      .then(d => setEntries(Array.isArray(d) ? d : [])); 
-  }, [trigger]);
+  useEffect(() => { authFetch('/entries').then(r=>r.json()).then(d => setEntries(Array.isArray(d) ? d : [])); }, [trigger]);
 
-  const confirmDelete = async () => { 
-    const res = await authFetch(`/entries/${deleteId}`, { method: 'DELETE' }); 
-    if(res.ok) { onUpdate(); showToast("Entry deleted"); } 
-    setDeleteId(null); 
-  };
+  const confirmDelete = async () => { const res = await authFetch(`/entries/${deleteId}`, { method: 'DELETE' }); if(res.ok) { onUpdate(); showToast("Entry deleted"); } setDeleteId(null); };
+  const handleSave = async (e) => { e.preventDefault(); await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, taskId: editingEntry.task_id, start: `${editingEntry.date}T${editingEntry.startTime}`, end: `${editingEntry.date}T${editingEntry.endTime}` }) }); setEditingEntry(null); onUpdate(); showToast("Entry updated"); };
+  const openEdit = (e) => { const d = new Date(e.start_time); const endD = new Date(e.end_time); setEditingEntry({ ...e, date: toLocalISOString(d), startTime: d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}), endTime: endD.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}) }); };
   
-  const handleSave = async (e) => { 
-    e.preventDefault(); 
-    const start = `${editingEntry.date}T${editingEntry.startTime}`; 
-    const end = `${editingEntry.date}T${editingEntry.endTime}`; 
-    await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, taskId: editingEntry.task_id, start, end }) }); 
-    setEditingEntry(null); 
-    onUpdate(); 
-    showToast("Entry updated"); 
-  };
-
-  const openEdit = (e) => { 
-    const d = new Date(e.start_time); 
-    const endD = new Date(e.end_time); 
-    setEditingEntry({ 
-      id: e.id, 
-      project_id: e.project_id,
-      task_id: e.task_id,
-      date: toLocalISOString(d), 
-      startTime: d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}), 
-      endTime: endD.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}) 
-    }); 
-  };
-
   return (
     <>
-      <div className="glass-panel rounded-3xl overflow-hidden h-full flex flex-col">
-        <div className="p-6 border-b border-slate-100 bg-white/50 flex justify-between items-center"><h3 className="font-bold text-slate-700">Recent Activity</h3><ArrowRight size={18} className="text-slate-400"/></div>
-        <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
-          {entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700 text-sm flex items-center gap-2">{e.project_name}</div><div className="text-xs text-slate-500">{e.task_name ? `${e.task_name} • ` : ''}{new Date(e.start_time).toLocaleDateString()}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => setDeleteId(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}
-          {entries.length === 0 && <div className="p-10 text-center text-slate-400">No recent entries.</div>}
-        </div>
+      <div className="glass-panel rounded-3xl h-96 overflow-y-auto p-4 custom-scrollbar">
+        <h3 className="font-bold text-slate-700 mb-4 sticky top-0 bg-white/90 p-2">Recent Activity</h3>
+        {entries.map(e => (
+          <div key={e.id} className="flex justify-between items-center p-3 mb-2 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+            <div>
+              <div className="font-bold text-slate-700 text-sm flex gap-2 items-center"><div className="w-2 h-2 rounded-full" style={{backgroundColor: e.color}}></div>{e.project_name}</div>
+              <div className="text-xs text-slate-500">{e.task_name ? `${e.task_name} • ` : ''}{new Date(e.start_time).toLocaleDateString()}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded">{Math.round(e.duration_seconds/60)}m</span>
+              <button onClick={() => openEdit(e)} className="p-1.5 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded"><Edit2 size={14}/></button>
+              <button onClick={() => setDeleteId(e.id)} className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded"><Trash2 size={14}/></button>
+            </div>
+          </div>
+        ))}
       </div>
       <Modal isOpen={!!editingEntry} onClose={() => setEditingEntry(null)} title="Edit Entry">
         {editingEntry && (
           <form onSubmit={handleSave} className="space-y-4">
-            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.project_id} onChange={e => setEditingEntry({...editingEntry, project_id: e.target.value, task_id: ''})}>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Task</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.task_id || ''} onChange={e => setEditingEntry({...editingEntry, task_id: e.target.value})}><option value="">-- No Task --</option>{projectsData.tasks.filter(t => t.project_id === parseInt(editingEntry.project_id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Date</label><input type="date" className="glass-input w-full p-3 rounded-xl" value={editingEntry.date} onChange={e => setEditingEntry({...editingEntry, date: e.target.value})}/></div>
-            <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Start</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.startTime} onChange={e => setEditingEntry({...editingEntry, startTime: e.target.value})}/></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">End</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.endTime} onChange={e => setEditingEntry({...editingEntry, endTime: e.target.value})}/></div></div>
-            <button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4 flex justify-center gap-2"><Save size={18}/> Save Changes</button>
+            <select className="glass-input w-full p-3 rounded-xl" value={editingEntry.project_id} onChange={e => setEditingEntry({...editingEntry, project_id: e.target.value, task_id: ''})}>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <select className="glass-input w-full p-3 rounded-xl" value={editingEntry.task_id || ''} onChange={e => setEditingEntry({...editingEntry, task_id: e.target.value})}><option value="">-- No Task --</option>{projectsData.tasks.filter(t => t.project_id === parseInt(editingEntry.project_id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+            <div className="grid grid-cols-2 gap-3"><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.startTime} onChange={e => setEditingEntry({...editingEntry, startTime: e.target.value})}/><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.endTime} onChange={e => setEditingEntry({...editingEntry, endTime: e.target.value})}/></div>
+            <button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold">Save</button>
           </form>
         )}
       </Modal>
-      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={confirmDelete} title="Delete Entry" message="Are you sure you want to delete this time entry?" />
+      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={confirmDelete} title="Delete Entry" message="Are you sure?" />
     </>
   );
 }
@@ -700,24 +713,9 @@ function HistoryList({ trigger, onUpdate, showToast, projectsData }) {
 function ManualEntryCard({ onUpdate, showToast, projectsData }) {
   const [formData, setFormData] = useState({ projectId: '', taskId: '', date: '', start: '', end: '' });
   const availableTasks = projectsData.tasks.filter(t => t.project_id === parseInt(formData.projectId));
-
-  const handleSubmit = async (e) => { 
-    e.preventDefault(); 
-    const res = await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ ...formData, start: `${formData.date}T${formData.start}`, end: `${formData.date}T${formData.end}` }) }); 
-    if(res.ok) { onUpdate(); showToast("Entry added"); } 
-  };
-  
+  const handleSubmit = async (e) => { e.preventDefault(); const res = await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ ...formData, start: `${formData.date}T${formData.start}`, end: `${formData.date}T${formData.end}` }) }); if(res.ok) { onUpdate(); showToast("Entry added"); } };
   return (
-    <div className="glass-panel rounded-3xl p-6 h-full">
-      <h3 className="font-bold text-slate-700 mb-6 flex items-center gap-2"><CalendarPlus size={20} className="text-indigo-500"/> Manual Entry</h3>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, projectId: e.target.value, taskId: ''})}><option value="">Select Project...</option>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Task (Optional)</label><select className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" disabled={!formData.projectId} onChange={e => setFormData({...formData, taskId: e.target.value})}><option value="">-- No Task --</option>{availableTasks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Date</label><input type="date" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, date: e.target.value})}/></div>
-        <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Start</label><input type="time" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, start: e.target.value})}/></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">End</label><input type="time" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, end: e.target.value})}/></div></div>
-        <button className="w-full bg-slate-800 text-white p-3.5 rounded-xl font-bold text-sm hover:bg-slate-900 transition-all shadow-lg mt-2">Add Entry</button>
-      </form>
-    </div>
+    <div className="glass-panel rounded-3xl p-6 h-full"><h3 className="font-bold text-slate-700 mb-6 flex items-center gap-2"><CalendarPlus size={20} className="text-indigo-500"/> Manual Entry</h3><form onSubmit={handleSubmit} className="space-y-4"><select className="glass-input w-full p-3 rounded-xl text-sm" onChange={e => setFormData({...formData, projectId: e.target.value, taskId: ''})}><option value="">Select Project...</option>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><select className="glass-input w-full p-3 rounded-xl text-sm" disabled={!formData.projectId} onChange={e => setFormData({...formData, taskId: e.target.value})}><option value="">-- No Task --</option>{availableTasks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><input type="date" className="glass-input w-full p-3 rounded-xl text-sm" onChange={e => setFormData({...formData, date: e.target.value})}/><div className="grid grid-cols-2 gap-3"><input type="time" className="glass-input w-full p-3 rounded-xl text-sm" onChange={e => setFormData({...formData, start: e.target.value})}/><input type="time" className="glass-input w-full p-3 rounded-xl text-sm" onChange={e => setFormData({...formData, end: e.target.value})}/></div><button className="w-full bg-slate-800 text-white p-3.5 rounded-xl font-bold text-sm">Add Entry</button></form></div>
   );
 }
 
@@ -738,34 +736,26 @@ function ProjectsManager({ showToast, projectsData, refreshProjects }) {
     <>
       <div className="glass-panel p-8 rounded-3xl max-w-4xl mb-6">
         <h3 className="font-bold text-slate-700 mb-6 text-xl">Create Project</h3>
-        <form onSubmit={addProject} className="flex gap-4"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold outline-none" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold shadow-lg shadow-indigo-200">Create</button></form>
+        <form onSubmit={addProject} className="flex gap-4"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold">Create</button></form>
       </div>
       <div className="grid gap-4 max-w-4xl">
         {projectsData.projects.map(p => {
           const tasks = projectsData.tasks.filter(t => t.project_id === p.id);
           const isExpanded = expandedProject === p.id;
           return (
-            <div key={p.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+            <div key={p.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all">
               <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={() => setExpandedProject(isExpanded ? null : p.id)}>
                 <div className="flex items-center gap-3"><span className="font-bold text-slate-700">{p.name}</span><span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">{tasks.length} tasks</span></div>
                 <div className="flex items-center gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); setEditingProject(p); }} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button>
-                  <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+                  <button onClick={(e) => { e.stopPropagation(); setEditingProject(p); }} className="p-2 text-slate-300 hover:text-indigo-600"><Edit2 size={18}/></button>
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={18}/></button>
                   {isExpanded ? <ChevronUp size={20} className="text-slate-400"/> : <ChevronDown size={20} className="text-slate-400"/>}
                 </div>
               </div>
               {isExpanded && (
                 <div className="p-4 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2">
-                  <div className="mb-4 flex gap-2"><input value={taskName} onChange={e=>setTaskName(e.target.value)} className="glass-input p-2 rounded-lg w-full text-sm font-medium outline-none" placeholder="New sub-task..." /><button onClick={() => addTask(p.id)} className="bg-slate-800 text-white px-4 rounded-lg font-bold text-sm hover:bg-slate-900"><Plus size={16}/></button></div>
-                  <div className="space-y-2">
-                    {tasks.map(t => (
-                      <div key={t.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 text-sm shadow-sm">
-                        <span className="text-slate-600 font-medium">{t.name}</span>
-                        <button onClick={() => delTask(t.id)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
-                      </div>
-                    ))}
-                    {tasks.length === 0 && <div className="text-xs text-slate-400 italic text-center p-2">No sub-tasks defined yet.</div>}
-                  </div>
+                  <div className="mb-4 flex gap-2"><input value={taskName} onChange={e=>setTaskName(e.target.value)} className="glass-input p-2 rounded-lg w-full text-sm font-medium" placeholder="New sub-task..." /><button onClick={() => addTask(p.id)} className="bg-slate-800 text-white px-4 rounded-lg font-bold text-sm"><Plus size={16}/></button></div>
+                  <div className="space-y-2">{tasks.map(t => (<div key={t.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 text-sm shadow-sm"><span className="text-slate-600 font-medium">{t.name}</span><button onClick={() => delTask(t.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button></div>))}</div>
                 </div>
               )}
             </div>
@@ -776,7 +766,7 @@ function ProjectsManager({ showToast, projectsData, refreshProjects }) {
         {editingProject && (
           <form onSubmit={handleSave} className="space-y-4">
             <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project Name</label><input className="glass-input w-full p-3 rounded-xl" value={editingProject.name} onChange={e => setEditingProject({...editingProject, name: e.target.value})}/></div>
-            <button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4 flex justify-center gap-2"><Save size={18}/> Update Project</button>
+            <button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4">Update Project</button>
           </form>
         )}
       </Modal>

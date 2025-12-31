@@ -9,6 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// SECRET KEY for signing tokens (In production, put this in .env!)
 const JWT_SECRET = 'super-secret-key-change-this-later';
 
 const connectionString = process.env.DATABASE_URL;
@@ -18,10 +19,11 @@ const pool = new Pool(
     : { user: process.env.DB_USER, host: process.env.DB_HOST, database: process.env.DB_NAME, password: process.env.DB_PASSWORD, port: process.env.DB_PORT }
 );
 
-// --- MIDDLEWARE ---
+// --- MIDDLEWARE: Protect Routes ---
+// This checks if the user sent a valid token
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
   if (!token) return res.sendStatus(401);
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
@@ -31,26 +33,16 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Middleware to check if user is admin
-const requireAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).send('Access denied: Admins only');
-  }
-  next();
-};
-
 // --- AUTH ROUTES ---
+
+// 1. REGISTER
 app.post('/api/auth/register', async (req, res) => {
   const { name, email, password } = req.body;
   try {
     const hashedPass = await bcrypt.hash(password, 10);
-    // First user registered becomes admin automatically, others are employees
-    const userCount = await pool.query('SELECT count(*) FROM users');
-    const role = userCount.rows[0].count === '0' ? 'admin' : 'employee';
-    
     const result = await pool.query(
-      'INSERT INTO users (name, email, password, role, avatar) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, role, avatar',
-      [name, email, hashedPass, role, '👤']
+      'INSERT INTO users (name, email, password, avatar) VALUES ($1, $2, $3, $4) RETURNING id, name, email, role, avatar',
+      [name, email, hashedPass, '👤']
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -59,37 +51,55 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+// 2. LOGIN
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = result.rows[0];
+    
     if (!user) return res.status(400).send('User not found');
     
     const validPass = await bcrypt.compare(password, user.password);
     if (!validPass) return res.status(403).send('Invalid password');
 
+    // Create Token
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
+    
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, avatar: user.avatar } });
   } catch (err) { res.status(500).send(err.message); }
 });
 
-// --- DATA ROUTES ---
+// --- PROTECTED ROUTES (Require Login) ---
 
 app.get('/api/users', authenticateToken, async (req, res) => {
-  const result = await pool.query('SELECT id, name, email, role, avatar FROM users ORDER BY id');
+  const result = await pool.query('SELECT id, name, role, avatar FROM users');
   res.json(result.rows);
 });
 
-// NEW: Update User Role (Admin Only)
-app.put('/api/users/:id/role', authenticateToken, requireAdmin, async (req, res) => {
+// ... existing code ...
+
+// NEW: Update user role (Admin only)
+app.put('/api/users/:id/role', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).send('Only admins can change roles');
+  }
+  
   const { role } = req.body; // 'admin' or 'employee'
   const { id } = req.params;
+
   try {
-    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, id]);
-    res.json({ success: true });
-  } catch (err) { res.status(500).send(err.message); }
+    const result = await pool.query(
+      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, name, email, role',
+      [role, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
 });
+
+// ... rest of existing code ...
 
 app.get('/api/projects', authenticateToken, async (req, res) => {
   const result = await pool.query('SELECT * FROM projects ORDER BY id');
@@ -109,6 +119,7 @@ app.delete('/api/projects/:id', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/entries', authenticateToken, async (req, res) => {
+  // Only get entries for the logged-in user!
   const result = await pool.query(`
     SELECT te.*, p.name as project_name, p.color 
     FROM time_entries te
@@ -151,8 +162,8 @@ app.post('/api/entries/manual', authenticateToken, async (req, res) => {
   res.json(result.rows[0]);
 });
 
-// Analytics (Admin or everyone? Prompt said admins only access the page, but let's secure the API too)
-app.get('/api/analytics', authenticateToken, requireAdmin, async (req, res) => {
+app.get('/api/analytics', authenticateToken, async (req, res) => {
+  // Shows data for ALL users (so you can see team performance)
   const result = await pool.query(`
     SELECT u.id as user_id, u.name as user_name, p.id as project_id, p.name as project_name, p.color,
     ROUND(SUM(EXTRACT(EPOCH FROM (te.end_time - te.start_time)) / 3600)::numeric, 2) as hours
@@ -164,6 +175,52 @@ app.get('/api/analytics', authenticateToken, requireAdmin, async (req, res) => {
   `);
   res.json(result.rows);
 });
+
+// ... existing code ...
+
+// --- NEW ROUTES FOR EDITING/DELETING ---
+
+// 1. Update a Project
+app.put('/api/projects/:id', authenticateToken, async (req, res) => {
+  const { name, color } = req.body;
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      'UPDATE projects SET name = $1, color = $2 WHERE id = $3 RETURNING *',
+      [name, color, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// 2. Update a Time Entry
+app.put('/api/entries/:id', authenticateToken, async (req, res) => {
+  const { projectId, start, end } = req.body;
+  const { id } = req.params;
+  
+  // Calculate duration
+  const startTime = new Date(start);
+  const endTime = new Date(end);
+  const duration = Math.floor((endTime - startTime) / 1000);
+
+  try {
+    const result = await pool.query(
+      'UPDATE time_entries SET project_id = $1, start_time = $2, end_time = $3, duration_seconds = $4 WHERE id = $5 RETURNING *',
+      [projectId, startTime, endTime, duration, id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// 3. Delete a Time Entry
+app.delete('/api/entries/:id', authenticateToken, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM time_entries WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).send(err.message); }
+});
+
+// ... existing app.listen ...
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Secure Backend running on port ${PORT}`));

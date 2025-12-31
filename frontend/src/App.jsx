@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Play, Square, Clock, Users, LogOut, BarChart3, Timer, FolderKanban, 
   Trash2, CalendarPlus, Mail, Lock, User, Shield, ShieldAlert, ArrowRight, 
-  Activity, Edit2, X, Save, Filter, ChevronDown, ChevronLeft, ChevronRight, 
-  Check, AlertTriangle, Settings, Eye, EyeOff, AlertCircle, CheckCircle2
+  Activity, Edit2, X, Save, Filter, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, 
+  Check, AlertTriangle, Settings, Eye, EyeOff, AlertCircle, CheckCircle2, Plus, CornerDownRight
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -23,9 +23,6 @@ class ErrorBoundary extends React.Component {
         <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-800 p-8 text-center">
           <AlertTriangle size={48} className="text-red-500 mb-4" />
           <h1 className="text-2xl font-bold mb-2">Something went wrong.</h1>
-          <pre className="bg-slate-200 p-4 rounded text-xs text-left mb-6 overflow-auto max-w-lg">
-            {this.state.error && this.state.error.toString()}
-          </pre>
           <button onClick={() => window.location.reload()} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-indigo-700">Reload Application</button>
         </div>
       );
@@ -45,12 +42,10 @@ const authFetch = async (endpoint, options = {}) => {
       localStorage.removeItem('timeapp_token');
       return { ok: false, status: res.status, json: async () => ({}) };
     }
-    
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) return res;
     return { ok: res.ok, status: res.status, json: async () => ({}) };
   } catch (err) {
-    console.error("Network Error:", err);
     return { ok: false, status: 500, json: async () => ({}) };
   }
 };
@@ -66,18 +61,14 @@ const formatDuration = (seconds) => {
 const toLocalISOString = (date) => {
   if (!date) return new Date().toISOString().split('T')[0];
   const offset = date.getTimezoneOffset() * 60000;
-  const localDate = new Date(date.getTime() - offset);
-  return localDate.toISOString().split('T')[0];
+  return new Date(date.getTime() - offset).toISOString().split('T')[0];
 };
 
 const stringToColor = (str) => {
   if (!str) return '#94a3b8';
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  const colors = [
-    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', 
-    '#6366f1', '#84cc16', '#14b8a6', '#f43f5e', '#d946ef', '#e11d48', '#22c55e'
-  ];
+  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#84cc16', '#14b8a6', '#f43f5e', '#d946ef', '#e11d48', '#22c55e'];
   return colors[Math.abs(hash) % colors.length];
 };
 
@@ -91,19 +82,15 @@ const GlobalStyles = () => (
     .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
     .glass-input { background: #f8fafc; border: 1px solid #e2e8f0; transition: all 0.2s; }
     .glass-input:focus { background: #fff; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
-    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    .chart-grid-row { display: grid; grid-template-columns: 180px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 12px; }
-    
-    /* Toast Animation */
-    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .chart-grid-row { display: grid; grid-template-columns: 220px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 12px; }
+    .chart-sub-row { display: grid; grid-template-columns: 200px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 8px; margin-left: 20px; opacity: 0.8; font-size: 0.85rem; }
     .toast-anim { animation: slideIn 0.3s ease-out forwards; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   `}</style>
 );
 
 // --- SHARED COMPONENTS ---
 
-// 1. Standard Modal
 function Modal({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
   return (
@@ -111,7 +98,7 @@ function Modal({ isOpen, onClose, title, children }) {
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <h3 className="font-bold text-lg text-slate-800">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200 transition-colors"><X size={20}/></button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
         </div>
         <div className="p-6">{children}</div>
       </div>
@@ -119,31 +106,27 @@ function Modal({ isOpen, onClose, title, children }) {
   );
 }
 
-// 2. Confirmation Modal (Red/Destructive)
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200 border-2 border-red-100">
-        <div className="p-6 text-center">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><AlertTriangle size={24}/></div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">{title}</h3>
-          <p className="text-slate-500 text-sm mb-6">{message}</p>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
-            <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 py-2.5 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-200 transition-colors">Delete</button>
-          </div>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 text-center animate-in zoom-in">
+        <AlertTriangle size={40} className="text-red-500 mx-auto mb-4"/>
+        <h3 className="text-lg font-bold mb-2">{title}</h3>
+        <p className="text-slate-500 text-sm mb-6">{message}</p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2 rounded-xl font-bold bg-slate-100">Cancel</button>
+          <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 py-2 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600">Delete</button>
         </div>
       </div>
     </div>
   );
 }
 
-// 3. Toast Notification
 function Toast({ message, type, onClose }) {
-  useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, [onClose]);
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, [onClose]);
   return (
-    <div className={`fixed top-6 right-6 z-[300] toast-anim flex items-center gap-3 px-6 py-4 rounded-xl shadow-xl border ${type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800'}`}>
+    <div className={`fixed top-6 right-6 z-[300] toast-anim px-6 py-4 rounded-xl shadow-xl border flex gap-3 ${type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800'}`}>
       {type === 'error' ? <AlertCircle size={20}/> : <CheckCircle2 size={20}/>}
       <span className="font-bold text-sm">{message}</span>
     </div>
@@ -154,31 +137,17 @@ const PasswordInput = ({ placeholder, value, onChange }) => {
   const [show, setShow] = useState(false);
   return (
     <div className="relative group">
-      <Lock className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} />
-      <input 
-        type={show ? 'text' : 'password'} 
-        placeholder={placeholder} 
-        className="glass-input w-full pl-12 pr-12 p-3.5 rounded-xl text-sm font-medium outline-none" 
-        value={value} 
-        onChange={onChange} 
-        required 
-      />
-      <button type="button" onClick={() => setShow(!show)} className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-600 focus:outline-none">
+      <Lock className="absolute left-4 top-3.5 text-slate-400" size={20} />
+      <input type={show ? 'text' : 'password'} placeholder={placeholder} className="glass-input w-full pl-12 pr-12 p-3.5 rounded-xl text-sm" value={value} onChange={onChange} required />
+      <button type="button" onClick={() => setShow(!show)} className="absolute right-4 top-3.5 text-slate-400 hover:text-slate-600">
         {show ? <EyeOff size={18} /> : <Eye size={18} />}
       </button>
     </div>
   );
 };
 
-// --- MAIN APP CORE ---
-
-export default function App() {
-  return (
-    <ErrorBoundary>
-      <AppContent />
-    </ErrorBoundary>
-  );
-}
+// --- MAIN APP ---
+export default function App() { return <ErrorBoundary><AppContent /></ErrorBoundary>; }
 
 function AppContent() {
   const [user, setUser] = useState(null);
@@ -187,17 +156,29 @@ function AppContent() {
   const [activeTimer, setActiveTimer] = useState(null);
   const [lastProject, setLastProject] = useState(null); 
   const [toast, setToast] = useState(null);
+  const [projectsData, setProjectsData] = useState({ projects: [], tasks: [] });
 
   const showToast = (msg, type = 'success') => setToast({ message: msg, type });
 
+  // Fetch Global Data (Projects & Tasks)
+  const refreshProjects = async () => {
+    const res = await authFetch('/projects');
+    if (res.ok) {
+      const data = await res.json();
+      setProjectsData({ projects: data.projects || [], tasks: data.tasks || [] });
+    }
+  };
+
   useEffect(() => {
     try {
-      const savedUser = localStorage.getItem('timeapp_user');
-      const token = localStorage.getItem('timeapp_token');
-      if (savedUser && token) setUser(JSON.parse(savedUser));
-    } catch (e) { console.error("Auth load error", e); }
+      const u = localStorage.getItem('timeapp_user');
+      const t = localStorage.getItem('timeapp_token');
+      if (u && t) setUser(JSON.parse(u));
+    } catch (e) {}
     setLoading(false);
   }, []);
+
+  useEffect(() => { if(user) refreshProjects(); }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -205,22 +186,18 @@ function AppContent() {
       const res = await authFetch('/entries/active');
       if (res && res.ok) {
         const data = await res.json();
-        if (data && data.id) {
-          setActiveTimer(data);
-          setLastProject(data.project_id); 
-        } else {
+        if (data && data.id) { setActiveTimer(data); setLastProject(data.project_id); }
+        else {
           setActiveTimer(null);
           const lastRes = await authFetch('/entries?limit=1');
-          if (lastRes.ok) {
-            const entries = await lastRes.json();
-            if (Array.isArray(entries) && entries.length > 0) setLastProject(entries[0].project_id);
+          if (lastRes.ok) { 
+            const entries = await lastRes.json(); 
+            if (Array.isArray(entries) && entries.length > 0) setLastProject(entries[0].project_id); 
           }
         }
       }
     };
-    checkTimer();
-    const interval = setInterval(checkTimer, 5000);
-    return () => clearInterval(interval);
+    checkTimer(); const i = setInterval(checkTimer, 5000); return () => clearInterval(i);
   }, [user]);
 
   const handleQuickToggle = async () => {
@@ -229,12 +206,9 @@ function AppContent() {
       setActiveTimer(null);
       showToast("Timer Stopped");
     } else {
-      if (!lastProject) return showToast("No recent project to resume.", "error");
+      if (!lastProject) return showToast("No recent project.", "error");
       const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: lastProject }) });
-      if (res.ok) {
-        setActiveTimer(await res.json());
-        showToast("Timer Resumed");
-      }
+      if (res.ok) { setActiveTimer(await res.json()); showToast("Timer Resumed"); }
     }
   };
 
@@ -244,8 +218,7 @@ function AppContent() {
     setUser(null);
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-slate-400 animate-pulse">Loading TimeApp...</div>;
-
+  if (loading) return <div className="h-screen flex items-center justify-center font-bold text-slate-400">Loading...</div>;
   if (!user) return <><GlobalStyles /><AuthScreen onLogin={(u, t) => { localStorage.setItem('timeapp_user', JSON.stringify(u)); localStorage.setItem('timeapp_token', t); setUser(u); }} /></>;
 
   return (
@@ -253,7 +226,7 @@ function AppContent() {
       <GlobalStyles />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <Sidebar user={user} activeView={currentView} onChangeView={setCurrentView} onLogout={handleLogout} activeTimer={activeTimer} onQuickToggle={handleQuickToggle} />
-      <MainContent user={user} setUser={setUser} view={currentView} activeTimer={activeTimer} onTimerUpdate={setActiveTimer} showToast={showToast} />
+      <MainContent user={user} setUser={setUser} view={currentView} activeTimer={activeTimer} onTimerUpdate={setActiveTimer} showToast={showToast} projectsData={projectsData} refreshProjects={refreshProjects} />
     </div>
   );
 }
@@ -266,29 +239,24 @@ function AuthScreen({ onLogin }) {
   const handleSubmit = async (e) => {
     e.preventDefault(); setError('');
     const endpoint = isRegister ? '/auth/register' : '/auth/login';
-    try {
-      const res = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) });
-      let data; const contentType = res.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) data = await res.json(); else data = await res.text();
-      if (!res.ok) throw new Error(typeof data === 'string' ? data : 'Authentication failed');
-      if (isRegister) { setIsRegister(false); setError('Account created! Check your email.'); } else onLogin(data.user, data.token);
-    } catch (err) { setError(err.message); }
+    const res = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) });
+    const data = await res.json();
+    if (!res.ok) return setError(typeof data === 'string' ? data : data.message || 'Error');
+    if (isRegister) { setIsRegister(false); setError('Account created! Check email.'); } else onLogin(data.user, data.token);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-blue-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
       <div className="glass-panel p-10 rounded-3xl shadow-2xl w-full max-w-md">
-        <div className="text-center mb-10"><div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-indigo-300 transform rotate-3"><Clock className="text-white" size={32} /></div><h1 className="text-3xl font-extrabold text-slate-800">{isRegister ? 'Join TimeApp' : 'Welcome Back'}</h1></div>
-        {error && <div className={`p-4 mb-6 text-sm rounded-xl font-medium ${error.includes('created') ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-600'}`}>{error}</div>}
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {isRegister && <div className="relative group"><User className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} /><input type="text" placeholder="Full Name" className="glass-input w-full pl-12 p-3.5 rounded-xl text-sm font-medium outline-none" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required /></div>}
-          <div className="relative group"><Mail className="absolute left-4 top-3.5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={20} /><input type="email" placeholder="Email" className="glass-input w-full pl-12 p-3.5 rounded-xl text-sm font-medium outline-none" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required /></div>
-          
+        <h1 className="text-2xl font-bold text-center mb-6">{isRegister ? 'Create Account' : 'Welcome Back'}</h1>
+        {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4 text-sm">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {isRegister && <input type="text" placeholder="Name" className="glass-input w-full p-3 rounded-xl" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />}
+          <input type="email" placeholder="Email" className="glass-input w-full p-3 rounded-xl" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} required />
           <PasswordInput placeholder="Password" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
-
-          <button className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-all shadow-lg text-sm">{isRegister ? 'Create Account' : 'Sign In'}</button>
+          <button className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl">{isRegister ? 'Sign Up' : 'Log In'}</button>
         </form>
-        <div className="mt-8 text-center text-sm font-medium text-slate-500"><button onClick={() => setIsRegister(!isRegister)} className="text-indigo-600 hover:underline">{isRegister ? 'Already have an account? Log In' : "Don't have an account? Sign Up"}</button></div>
+        <button onClick={() => setIsRegister(!isRegister)} className="w-full text-center mt-4 text-sm text-indigo-600 font-bold">{isRegister ? 'Switch to Login' : 'Create Account'}</button>
       </div>
     </div>
   );
@@ -297,84 +265,44 @@ function AuthScreen({ onLogin }) {
 function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuickToggle }) {
   const isAdmin = user.role === 'admin';
   const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    if (!activeTimer) { setElapsed(0); return; }
-    const tick = () => { const s = Math.floor((new Date() - new Date(activeTimer.start_time)) / 1000); setElapsed(s > 0 ? s : 0); };
-    tick(); const interval = setInterval(tick, 1000); return () => clearInterval(interval);
-  }, [activeTimer]);
+  useEffect(() => { if (!activeTimer) { setElapsed(0); return; } const i = setInterval(() => { setElapsed(Math.floor((new Date() - new Date(activeTimer.start_time)) / 1000)); }, 1000); return () => clearInterval(i); }, [activeTimer]);
 
   return (
-    <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full shadow-2xl z-20 shrink-0">
-      <div className="p-8 flex items-center gap-3"><div className="bg-indigo-500 text-white p-2 rounded-lg"><Clock size={24} /></div><span className="font-extrabold text-2xl text-white">TimeApp</span></div>
-      
-      <div className="px-6 mb-2">
-        <div className={`p-4 rounded-2xl flex flex-col gap-3 transition-all ${activeTimer ? 'bg-indigo-900/50 border border-indigo-500/30' : 'bg-slate-800/50 border border-slate-700'}`}>
-           <div className="flex justify-between items-center">
-             <span className="text-xs font-bold uppercase tracking-wide text-slate-400">{activeTimer ? 'Active Session' : 'Timer Idle'}</span>
-             {activeTimer && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]"></div>}
-           </div>
-           <div className="text-2xl font-mono font-bold text-white">{formatDuration(elapsed)}</div>
-           <button onClick={onQuickToggle} className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${activeTimer ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
-             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> {activeTimer ? 'RESUME' : 'RESUME'}</>}
-           </button>
-        </div>
+    <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full p-4">
+      <div className="p-4 flex items-center gap-3 mb-4"><Clock className="text-indigo-500"/><span className="font-bold text-xl text-white">TimeApp</span></div>
+      <div className="mb-6 p-4 rounded-xl bg-slate-800 border border-slate-700">
+         <div className="flex justify-between text-xs font-bold uppercase text-slate-400 mb-2"><span>{activeTimer ? 'Active' : 'Idle'}</span>{activeTimer && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"/>}</div>
+         <div className="text-xl font-mono font-bold text-white mb-2">{formatDuration(elapsed)}</div>
+         <button onClick={onQuickToggle} className={`w-full py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-2 ${activeTimer ? 'bg-red-500 text-white' : 'bg-indigo-600 text-white'}`}>{activeTimer ? 'STOP' : 'RESUME'}</button>
       </div>
-
-      <nav className="flex-1 px-4 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
-        <div className="px-4 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Workspace</div>
+      <nav className="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
         <NavItem icon={<Timer />} label="Tracker" isActive={activeView === 'tracker'} onClick={() => onChangeView('tracker')} />
         <NavItem icon={<Settings />} label="Settings" isActive={activeView === 'settings'} onClick={() => onChangeView('settings')} />
-        {isAdmin && <>
-          <div className="px-4 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 mt-8">Admin Console</div>
-          <NavItem icon={<BarChart3 />} label="Analytics" isActive={activeView === 'analytics'} onClick={() => onChangeView('analytics')} />
-          <NavItem icon={<FolderKanban />} label="Projects" isActive={activeView === 'projects'} onClick={() => onChangeView('projects')} />
-          <NavItem icon={<Users />} label="Team" isActive={activeView === 'team'} onClick={() => onChangeView('team')} />
-        </>}
+        {isAdmin && <><div className="pt-6 pb-2 px-3 text-xs font-bold text-slate-500 uppercase">Admin</div><NavItem icon={<BarChart3 />} label="Analytics" isActive={activeView === 'analytics'} onClick={() => onChangeView('analytics')} /><NavItem icon={<FolderKanban />} label="Projects" isActive={activeView === 'projects'} onClick={() => onChangeView('projects')} /><NavItem icon={<Users />} label="Team" isActive={activeView === 'team'} onClick={() => onChangeView('team')} /></>}
       </nav>
-      
-      <div className="p-6 border-t border-slate-800 bg-slate-900">
-        <div className="flex items-center gap-3 mb-4"><div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-lg text-white font-bold">{user.avatar}</div><div className="overflow-hidden"><div className="text-sm font-bold text-white truncate">{user.name} {isAdmin && <Shield size={12} className="inline text-indigo-400" />}</div><div className="text-xs text-slate-500 truncate">{user.email}</div></div></div>
-        <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800 px-4 py-3 rounded-xl transition-all text-sm font-bold"><LogOut size={16}/> Log Out</button>
-      </div>
+      <button onClick={onLogout} className="mt-4 w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white p-3 rounded-xl hover:bg-slate-800"><LogOut size={16}/> Log Out</button>
     </aside>
   );
 }
 
-function NavItem({ icon, label, isActive, onClick }) {
-  return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-200 ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>{React.cloneElement(icon, { size: 18, strokeWidth: 2.5 })} {label}</button>;
-}
+function NavItem({ icon, label, isActive, onClick }) { return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${isActive ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}>{React.cloneElement(icon, { size: 18 })} {label}</button>; }
 
-function MainContent({ user, setUser, view, activeTimer, onTimerUpdate, showToast }) {
-  const [trigger, setTrigger] = useState(0);
-  const update = () => { setTrigger(t => t + 1); };
-
+function MainContent({ user, setUser, view, activeTimer, onTimerUpdate, showToast, projectsData, refreshProjects }) {
+  const [trigger, setTrigger] = useState(0); const update = () => setTrigger(t => t + 1);
   return (
-    <main className="flex-1 p-8 md:p-12 overflow-y-auto bg-slate-100/50">
-      <header className="mb-8"><h2 className="text-3xl font-extrabold text-slate-900 tracking-tight capitalize">{view === 'analytics' ? 'Dashboard' : view}</h2></header>
-      
-      {view === 'tracker' && (
-        <div className="max-w-6xl space-y-8">
-          <TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update} showToast={showToast} />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update} showToast={showToast} /></div>
-            <div><ManualEntryCard onUpdate={update} showToast={showToast} /></div>
-          </div>
-        </div>
-      )}
-      
+    <main className="flex-1 p-8 overflow-y-auto bg-slate-100">
+      <h2 className="text-3xl font-bold text-slate-900 mb-8 capitalize">{view}</h2>
+      {view === 'tracker' && <div className="max-w-6xl space-y-8"><TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update} showToast={showToast} projectsData={projectsData} /><div className="grid grid-cols-1 lg:grid-cols-3 gap-8"><div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update} showToast={showToast} projectsData={projectsData} /></div><div><ManualEntryCard onUpdate={update} showToast={showToast} projectsData={projectsData} /></div></div></div>}
       {view === 'settings' && <SettingsView user={user} showToast={showToast} onUpdate={(u) => { setUser({...user, ...u}); localStorage.setItem('timeapp_user', JSON.stringify({...user, ...u})); }} />}
-      
-      {view === 'analytics' && user.role === 'admin' && <AnalyticsView trigger={trigger}/>}
-      {view === 'projects' && user.role === 'admin' && <ProjectsManager showToast={showToast}/>}
+      {view === 'analytics' && user.role === 'admin' && <AnalyticsView trigger={trigger} projectsData={projectsData} />}
+      {view === 'projects' && user.role === 'admin' && <ProjectsManager showToast={showToast} projectsData={projectsData} refreshProjects={refreshProjects} />}
       {view === 'team' && user.role === 'admin' && <TeamView currentUser={user} showToast={showToast} />}
-      
       {(view !== 'tracker' && view !== 'settings' && user.role !== 'admin') && <div className="flex flex-col items-center justify-center h-96 text-slate-400 glass-panel rounded-3xl"><ShieldAlert size={64} className="mb-4 text-slate-300"/><h3 className="text-xl font-bold text-slate-600">Access Restricted</h3></div>}
     </main>
   );
 }
 
-// --- SETTINGS VIEW (Full Component) ---
+// --- SETTINGS VIEW ---
 function SettingsView({ user, onUpdate, showToast }) {
   const [profile, setProfile] = useState({ name: user.name, email: user.email });
   const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
@@ -424,7 +352,7 @@ function SettingsView({ user, onUpdate, showToast }) {
   );
 }
 
-// --- TEAM VIEW (Full Component) ---
+// --- TEAM VIEW ---
 function TeamView({ currentUser, showToast }) {
   const [users, setUsers] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -484,6 +412,7 @@ function AnalyticsView({ trigger }) {
   const [viewMode, setViewMode] = useState('month'); 
   const [selectedProjects, setSelectedProjects] = useState([]); 
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [expandedRow, setExpandedRow] = useState(null);
   const filterRef = useRef(null);
 
   useEffect(() => {
@@ -491,7 +420,7 @@ function AnalyticsView({ trigger }) {
     document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => { authFetch('/projects').then(r => r.json()).then(d => setProjects(Array.isArray(d) ? d : [])); }, []);
+  useEffect(() => { authFetch('/projects').then(r => r.json()).then(d => setProjects(Array.isArray(d) ? d.projects : [])); }, []);
 
   useEffect(() => {
     let query = '?';
@@ -524,36 +453,29 @@ function AnalyticsView({ trigger }) {
     else setSelectedProjects([...selectedProjects, id]);
   };
 
-  const projectData = useMemo(() => {
-    if (!data.length) return { chartData: [], users: [], maxTotal: 1 };
-    const map = {}; const usersSet = new Set();
-    
-    data.forEach(item => { 
-      const pName = item.project_name || 'Unknown'; 
-      if (!map[pName]) map[pName] = { name: pName, total: 0 }; 
-      const hours = Number(item.hours) || 0;
-      map[pName][item.user_name] = hours;
-      map[pName].total += hours;
-      usersSet.add(item.user_name);
-    });
-    
-    const chartData = Object.values(map).sort((a,b) => b.total - a.total);
-    const maxTotal = Math.max(...chartData.map(d => d.total), 1); 
-    return { chartData, users: Array.from(usersSet), maxTotal };
-  }, [data]);
-
-  const userData = useMemo(() => {
-    if (!data.length) return {};
+  const processedData = useMemo(() => {
     const map = {};
-    data.forEach(item => { 
-      if (!map[item.user_name]) map[item.user_name] = []; 
-      map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) || 0 }); 
+    
+    data.forEach(item => {
+      const pName = item.project_name || 'Unknown';
+      if (!map[pName]) map[pName] = { name: pName, total: 0, users: {}, tasks: {} };
+      
+      const hours = Number(item.hours) || 0;
+      map[pName].total += hours;
+      
+      // User total for project
+      map[pName].users[item.user_name] = (map[pName].users[item.user_name] || 0) + hours;
+
+      // Task breakdown
+      const tName = item.task_name || '(No Task)';
+      if (!map[pName].tasks[tName]) map[pName].tasks[tName] = { total: 0, users: {} };
+      map[pName].tasks[tName].total += hours;
+      map[pName].tasks[tName].users[item.user_name] = (map[pName].tasks[tName].users[item.user_name] || 0) + hours;
     });
-    Object.keys(map).forEach(u => {
-      map[u].sort((a,b) => b.hours - a.hours);
-      map[u].max = Math.max(...map[u].map(x => x.hours), 1);
-    });
-    return map;
+
+    const chartData = Object.values(map).sort((a,b) => b.total - a.total);
+    const globalMax = Math.max(...chartData.map(d => d.total), 1);
+    return { chartData, globalMax };
   }, [data]);
 
   return (
@@ -601,86 +523,68 @@ function AnalyticsView({ trigger }) {
 
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><Activity className="text-indigo-600"/> Team Project Distribution</h3>
-        {projectData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
+        {processedData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
           <div className="w-full">
             <div className="chart-grid-row text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
-              <div>Project</div><div>Distribution</div><div className="text-right">Total</div>
+              <div></div><div>Project</div><div>Distribution</div><div className="text-right">Total</div>
             </div>
             <div className="space-y-3">
-              {projectData.chartData.map((p) => (
-                <div key={p.name} className="chart-grid-row group">
-                  <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
-                  
-                  {/* BAR CONTAINER */}
-                  <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative w-full">
-                    {/* SCALED WRAPPER */}
-                    <div className="h-full flex" style={{ width: `${(p.total / projectData.maxTotal) * 100}%` }}>
-                       {projectData.users.map(u => {
-                         const hours = p[u] || 0;
-                         if (hours === 0) return null;
-                         const pct = (hours / p.total) * 100; 
-                         return (
-                           <div key={u} style={{width: `${pct}%`, backgroundColor: stringToColor(u)}} className="h-full relative group/segment">
-                              <div className="opacity-0 group-hover/segment:opacity-100 absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-1 rounded whitespace-nowrap z-10 pointer-events-none">{u}: {hours.toFixed(1)}h</div>
-                           </div>
-                         );
-                       })}
+              {processedData.chartData.map((p) => (
+                <div key={p.name}>
+                  {/* Main Project Row */}
+                  <div className="chart-grid-row group cursor-pointer hover:bg-slate-50 rounded-lg p-1" onClick={() => setExpandedRow(expandedRow === p.name ? null : p.name)}>
+                    <div className="flex justify-center text-slate-400">{expandedRow === p.name ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}</div>
+                    <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
+                    <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative w-full">
+                      <div className="h-full flex" style={{ width: `${(p.total / processedData.globalMax) * 100}%` }}>
+                         {Object.entries(p.users).map(([u, h]) => (
+                           <div key={u} style={{width: `${(h/p.total)*100}%`, backgroundColor: stringToColor(u)}} className="h-full" title={`${u}: ${h.toFixed(1)}h`}></div>
+                         ))}
+                      </div>
                     </div>
+                    <div className="text-right font-bold text-slate-800 text-sm">{p.total.toFixed(1)}h</div>
                   </div>
-                  
-                  <div className="text-right font-bold text-slate-800 text-sm">{p.total.toFixed(1)}h</div>
+
+                  {/* Sub-rows (Tasks) */}
+                  {expandedRow === p.name && (
+                    <div className="mb-4 bg-slate-50/50 p-2 rounded-xl border border-slate-100 animate-in slide-in-from-top-2">
+                      {Object.entries(p.tasks).map(([tName, tData]) => (
+                        <div key={tName} className="chart-sub-row">
+                          <div className="flex justify-end pr-2"><CornerDownRight size={14} className="text-slate-300"/></div>
+                          <div className="text-xs font-medium text-slate-500 truncate">{tName}</div>
+                          <div className="h-2 bg-slate-200 rounded-full overflow-hidden w-full">
+                            <div className="h-full flex" style={{ width: `${(tData.total / p.total) * 100}%` }}> {/* Relative to Project Total */}
+                               {Object.entries(tData.users).map(([u, h]) => (
+                                 <div key={u} style={{width: `${(h/tData.total)*100}%`, backgroundColor: stringToColor(u)}} className="h-full" title={`${u}: ${h.toFixed(1)}h`}></div>
+                               ))}
+                            </div>
+                          </div>
+                          <div className="text-right text-xs font-mono text-slate-400">{tData.total.toFixed(1)}h</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-            <div className="flex flex-wrap gap-4 mt-8 pt-6 border-t border-slate-100">{projectData.users.map(u => (<div key={u} className="flex items-center gap-2 text-xs font-bold text-slate-600"><div className="w-3 h-3 rounded-full" style={{backgroundColor: stringToColor(u)}}></div> {u}</div>))}</div>
+            <div className="flex flex-wrap gap-4 mt-8 pt-6 border-t border-slate-100">{Object.keys(processedData.chartData[0]?.users || {}).map(u => (<div key={u} className="flex items-center gap-2 text-xs font-bold text-slate-600"><div className="w-3 h-3 rounded-full" style={{backgroundColor: stringToColor(u)}}></div> {u}</div>))}</div>
           </div>
         )}
-      </div>
-
-      <div className="space-y-6">
-         <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
-         {Object.entries(userData).map(([userName, entries]) => (
-            <div key={userName} className="glass-panel p-8 rounded-3xl hover:shadow-lg transition-all">
-               <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-4">
-                  <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><User size={20}/></div>
-                  <h4 className="font-bold text-lg text-slate-700">{userName}</h4>
-                  <div className="ml-auto font-mono font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-lg text-sm">Total: {entries.reduce((a,b)=>a+b.hours,0).toFixed(1)}h</div>
-               </div>
-               <div className="space-y-2">
-                  {entries.map(e => (
-                    <div key={e.project} className="chart-grid-row">
-                       <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
-                       
-                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
-                          {/* Use Pre-calculated Max to avoid NaN */}
-                          <div style={{width: `${Math.min(100, (e.hours / userData[userName].max) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
-                       </div>
-                       
-                       <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
-                    </div>
-                  ))}
-                  {entries.length === 0 && <div className="text-sm text-slate-400 italic">No activity recorded.</div>}
-               </div>
-            </div>
-         ))}
       </div>
     </div>
   );
 }
 
-function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast }) {
-  const [projects, setProjects] = useState([]);
-  const [proj, setProj] = useState('');
+function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast, projectsData }) {
+  const [proj, setProj] = useState(''); 
+  const [task, setTask] = useState('');
   const [elapsed, setElapsed] = useState(0);
 
-  useEffect(() => { 
-    authFetch('/projects')
-      .then(r => r.json())
-      .then(d => setProjects(Array.isArray(d) ? d : [])); 
-  }, []);
+  // Filter tasks based on selected project
+  const availableTasks = projectsData.tasks.filter(t => t.project_id === parseInt(proj));
 
   useEffect(() => { 
-    if (activeTimer) setProj(activeTimer.project_id); 
+    if (activeTimer) { setProj(activeTimer.project_id); setTask(activeTimer.task_id || ''); } 
     else setElapsed(0); 
   }, [activeTimer]);
 
@@ -698,7 +602,7 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast 
       showToast("Timer Stopped"); 
     } else { 
       if(!proj) return alert('Select project'); 
-      const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: proj }) }); 
+      const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: proj, taskId: task }) }); 
       if(res.ok) { onTimerUpdate(await res.json()); showToast("Timer Started"); } 
     } 
   };
@@ -706,12 +610,17 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast 
   return (
     <div className="glass-panel p-8 rounded-3xl flex flex-col md:flex-row items-end gap-6 relative overflow-hidden">
       {activeTimer && <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-red-500 via-orange-500 to-red-500 animate-pulse"></div>}
-      <div className="flex-1 w-full space-y-2">
-        <label className="text-xs font-extrabold text-slate-400 uppercase tracking-widest ml-1">Current Task Project</label>
-        <div className="relative">
-          <FolderKanban className="absolute left-4 top-4 text-slate-400" size={20}/>
-          <select className="glass-input w-full pl-12 p-4 rounded-xl text-slate-700 font-bold outline-none appearance-none" value={proj} onChange={e=>setProj(e.target.value)} disabled={!!activeTimer}>
-            <option value="">Select a Project...</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+      <div className="flex-1 w-full flex gap-4">
+        <div className="flex-1 space-y-2">
+          <label className="text-xs font-extrabold text-slate-400 uppercase tracking-widest ml-1">Project</label>
+          <select className="glass-input w-full p-4 rounded-xl font-bold text-slate-700" value={proj} onChange={e=>{setProj(e.target.value); setTask('');}} disabled={!!activeTimer}>
+            <option value="">Select Project...</option>{projectsData.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="flex-1 space-y-2">
+          <label className="text-xs font-extrabold text-slate-400 uppercase tracking-widest ml-1">Task (Optional)</label>
+          <select className="glass-input w-full p-4 rounded-xl font-bold text-slate-700" value={task} onChange={e=>setTask(e.target.value)} disabled={!!activeTimer || !proj}>
+            <option value="">-- No Task --</option>{availableTasks.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </div>
       </div>
@@ -723,10 +632,9 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast 
   );
 }
 
-function HistoryList({ trigger, onUpdate, showToast }) {
+function HistoryList({ trigger, onUpdate, showToast, projectsData }) {
   const [entries, setEntries] = useState([]);
   const [editingEntry, setEditingEntry] = useState(null);
-  const [projects, setProjects] = useState([]);
   const [deleteId, setDeleteId] = useState(null);
 
   useEffect(() => { 
@@ -734,10 +642,6 @@ function HistoryList({ trigger, onUpdate, showToast }) {
       .then(r=>r.json())
       .then(d => setEntries(Array.isArray(d) ? d : [])); 
   }, [trigger]);
-
-  useEffect(() => { 
-    if(editingEntry) authFetch('/projects').then(r=>r.json()).then(d => setProjects(Array.isArray(d) ? d : [])); 
-  }, [editingEntry]);
 
   const confirmDelete = async () => { 
     const res = await authFetch(`/entries/${deleteId}`, { method: 'DELETE' }); 
@@ -749,7 +653,7 @@ function HistoryList({ trigger, onUpdate, showToast }) {
     e.preventDefault(); 
     const start = `${editingEntry.date}T${editingEntry.startTime}`; 
     const end = `${editingEntry.date}T${editingEntry.endTime}`; 
-    await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, start, end }) }); 
+    await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, taskId: editingEntry.task_id, start, end }) }); 
     setEditingEntry(null); 
     onUpdate(); 
     showToast("Entry updated"); 
@@ -760,7 +664,8 @@ function HistoryList({ trigger, onUpdate, showToast }) {
     const endD = new Date(e.end_time); 
     setEditingEntry({ 
       id: e.id, 
-      project_id: e.project_id, 
+      project_id: e.project_id,
+      task_id: e.task_id,
       date: toLocalISOString(d), 
       startTime: d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}), 
       endTime: endD.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}) 
@@ -772,14 +677,15 @@ function HistoryList({ trigger, onUpdate, showToast }) {
       <div className="glass-panel rounded-3xl overflow-hidden h-full flex flex-col">
         <div className="p-6 border-b border-slate-100 bg-white/50 flex justify-between items-center"><h3 className="font-bold text-slate-700">Recent Activity</h3><ArrowRight size={18} className="text-slate-400"/></div>
         <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
-          {entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700">{e.project_name}</div><div className="text-xs text-slate-400 font-medium">{new Date(e.start_time).toLocaleDateString()} • {new Date(e.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => setDeleteId(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}
+          {entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700 text-sm flex items-center gap-2">{e.project_name}</div><div className="text-xs text-slate-500">{e.task_name ? `${e.task_name} • ` : ''}{new Date(e.start_time).toLocaleDateString()}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => setDeleteId(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}
           {entries.length === 0 && <div className="p-10 text-center text-slate-400">No recent entries.</div>}
         </div>
       </div>
       <Modal isOpen={!!editingEntry} onClose={() => setEditingEntry(null)} title="Edit Entry">
         {editingEntry && (
           <form onSubmit={handleSave} className="space-y-4">
-            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.project_id} onChange={e => setEditingEntry({...editingEntry, project_id: e.target.value})}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.project_id} onChange={e => setEditingEntry({...editingEntry, project_id: e.target.value, task_id: ''})}>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Task</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.task_id || ''} onChange={e => setEditingEntry({...editingEntry, task_id: e.target.value})}><option value="">-- No Task --</option>{projectsData.tasks.filter(t => t.project_id === parseInt(editingEntry.project_id)).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
             <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Date</label><input type="date" className="glass-input w-full p-3 rounded-xl" value={editingEntry.date} onChange={e => setEditingEntry({...editingEntry, date: e.target.value})}/></div>
             <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Start</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.startTime} onChange={e => setEditingEntry({...editingEntry, startTime: e.target.value})}/></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">End</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.endTime} onChange={e => setEditingEntry({...editingEntry, endTime: e.target.value})}/></div></div>
             <button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4 flex justify-center gap-2"><Save size={18}/> Save Changes</button>
@@ -791,19 +697,13 @@ function HistoryList({ trigger, onUpdate, showToast }) {
   );
 }
 
-function ManualEntryCard({ onUpdate, showToast }) {
-  const [projects, setProjects] = useState([]);
-  const [formData, setFormData] = useState({ projectId: '', date: '', start: '', end: '' });
-
-  useEffect(() => { 
-    authFetch('/projects')
-      .then(r => r.json())
-      .then(d => setProjects(Array.isArray(d) ? d : [])); 
-  }, []);
+function ManualEntryCard({ onUpdate, showToast, projectsData }) {
+  const [formData, setFormData] = useState({ projectId: '', taskId: '', date: '', start: '', end: '' });
+  const availableTasks = projectsData.tasks.filter(t => t.project_id === parseInt(formData.projectId));
 
   const handleSubmit = async (e) => { 
     e.preventDefault(); 
-    const res = await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ projectId: formData.projectId, start: new Date(`${formData.date}T${formData.start}`).toISOString(), end: new Date(`${formData.date}T${formData.end}`).toISOString() }) }); 
+    const res = await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ ...formData, start: `${formData.date}T${formData.start}`, end: `${formData.date}T${formData.end}` }) }); 
     if(res.ok) { onUpdate(); showToast("Entry added"); } 
   };
   
@@ -811,7 +711,8 @@ function ManualEntryCard({ onUpdate, showToast }) {
     <div className="glass-panel rounded-3xl p-6 h-full">
       <h3 className="font-bold text-slate-700 mb-6 flex items-center gap-2"><CalendarPlus size={20} className="text-indigo-500"/> Manual Entry</h3>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, projectId: e.target.value})}><option>Select...</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, projectId: e.target.value, taskId: ''})}><option value="">Select Project...</option>{projectsData.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Task (Optional)</label><select className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" disabled={!formData.projectId} onChange={e => setFormData({...formData, taskId: e.target.value})}><option value="">-- No Task --</option>{availableTasks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
         <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Date</label><input type="date" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, date: e.target.value})}/></div>
         <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Start</label><input type="time" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, start: e.target.value})}/></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">End</label><input type="time" className="glass-input w-full p-3 rounded-xl text-sm font-bold text-slate-700 outline-none" onChange={e => setFormData({...formData, end: e.target.value})}/></div></div>
         <button className="w-full bg-slate-800 text-white p-3.5 rounded-xl font-bold text-sm hover:bg-slate-900 transition-all shadow-lg mt-2">Add Entry</button>
@@ -820,25 +721,56 @@ function ManualEntryCard({ onUpdate, showToast }) {
   );
 }
 
-function ProjectsManager({ showToast }) {
-  const [projects, setProjects] = useState([]);
+function ProjectsManager({ showToast, projectsData, refreshProjects }) {
   const [name, setName] = useState('');
+  const [taskName, setTaskName] = useState('');
   const [editingProject, setEditingProject] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
+  const [expandedProject, setExpandedProject] = useState(null);
 
-  useEffect(() => { refresh(); }, []);
-  const refresh = () => authFetch('/projects').then(r=>r.json()).then(d => setProjects(Array.isArray(d) ? d : []));
-  
-  const add = async (e) => { e.preventDefault(); const res = await authFetch('/projects', { method:'POST', body:JSON.stringify({name, color:'#333'}) }); if(res.ok) { setName(''); refresh(); showToast("Project created"); } };
-  const confirmDelete = async () => { const res = await authFetch(`/projects/${deleteId}`, { method: 'DELETE' }); if(res.ok) { refresh(); showToast("Project deleted"); } setDeleteId(null); };
-  const handleSave = async (e) => { e.preventDefault(); const res = await authFetch(`/projects/${editingProject.id}`, { method: 'PUT', body: JSON.stringify({ name: editingProject.name, color: editingProject.color }) }); if(res.ok) { setEditingProject(null); refresh(); showToast("Project updated"); } };
-  
+  const addProject = async (e) => { e.preventDefault(); const res = await authFetch('/projects', { method:'POST', body:JSON.stringify({name, color:'#333'}) }); if(res.ok) { setName(''); refreshProjects(); showToast("Project created"); } };
+  const addTask = async (projectId) => { const res = await authFetch('/tasks', { method:'POST', body:JSON.stringify({name: taskName, projectId}) }); if(res.ok) { setTaskName(''); refreshProjects(); showToast("Task created"); } };
+  const confirmDelete = async () => { const res = await authFetch(`/projects/${deleteId}`, { method: 'DELETE' }); if(res.ok) { refreshProjects(); showToast("Project deleted"); } setDeleteId(null); };
+  const handleSave = async (e) => { e.preventDefault(); const res = await authFetch(`/projects/${editingProject.id}`, { method: 'PUT', body: JSON.stringify({ name: editingProject.name, color: editingProject.color }) }); if(res.ok) { setEditingProject(null); refreshProjects(); showToast("Project updated"); } };
+  const delTask = async (id) => { if(window.confirm('Delete task?')) { await authFetch(`/tasks/${id}`, { method: 'DELETE' }); refreshProjects(); } };
+
   return (
     <>
-      <div className="glass-panel p-8 rounded-3xl max-w-4xl">
-        <h3 className="font-bold text-slate-700 mb-6 text-xl">Projects</h3>
-        <form onSubmit={add} className="flex gap-4 mb-8"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold outline-none" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold shadow-lg shadow-indigo-200">Create</button></form>
-        <div className="grid gap-3">{projects.map(p=><div key={p.id} className="p-4 rounded-xl bg-white border border-slate-100 flex justify-between items-center group hover:shadow-md transition-all"><span className="font-bold text-slate-700">{p.name}</span><div className="flex gap-2"><button onClick={() => setEditingProject(p)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button><button onClick={() => setDeleteId(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button></div></div>)}</div>
+      <div className="glass-panel p-8 rounded-3xl max-w-4xl mb-6">
+        <h3 className="font-bold text-slate-700 mb-6 text-xl">Create Project</h3>
+        <form onSubmit={addProject} className="flex gap-4"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold outline-none" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold shadow-lg shadow-indigo-200">Create</button></form>
+      </div>
+      <div className="grid gap-4 max-w-4xl">
+        {projectsData.projects.map(p => {
+          const tasks = projectsData.tasks.filter(t => t.project_id === p.id);
+          const isExpanded = expandedProject === p.id;
+          return (
+            <div key={p.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+              <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50" onClick={() => setExpandedProject(isExpanded ? null : p.id)}>
+                <div className="flex items-center gap-3"><span className="font-bold text-slate-700">{p.name}</span><span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-500 font-bold">{tasks.length} tasks</span></div>
+                <div className="flex items-center gap-2">
+                  <button onClick={(e) => { e.stopPropagation(); setEditingProject(p); }} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button>
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteId(p.id); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+                  {isExpanded ? <ChevronUp size={20} className="text-slate-400"/> : <ChevronDown size={20} className="text-slate-400"/>}
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="p-4 bg-slate-50 border-t border-slate-100 animate-in slide-in-from-top-2">
+                  <div className="mb-4 flex gap-2"><input value={taskName} onChange={e=>setTaskName(e.target.value)} className="glass-input p-2 rounded-lg w-full text-sm font-medium outline-none" placeholder="New sub-task..." /><button onClick={() => addTask(p.id)} className="bg-slate-800 text-white px-4 rounded-lg font-bold text-sm hover:bg-slate-900"><Plus size={16}/></button></div>
+                  <div className="space-y-2">
+                    {tasks.map(t => (
+                      <div key={t.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-slate-200 text-sm shadow-sm">
+                        <span className="text-slate-600 font-medium">{t.name}</span>
+                        <button onClick={() => delTask(t.id)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                      </div>
+                    ))}
+                    {tasks.length === 0 && <div className="text-xs text-slate-400 italic text-center p-2">No sub-tasks defined yet.</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       <Modal isOpen={!!editingProject} onClose={() => setEditingProject(null)} title="Edit Project">
         {editingProject && (

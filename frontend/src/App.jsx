@@ -33,12 +33,11 @@ const formatDuration = (seconds) => {
   return `${h}:${m}:${s}`;
 };
 
-// HELPER: Get Local Date String (YYYY-MM-DD) avoiding UTC shifts
-const getLocalDateString = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+// FIX: Generate Local Date String (YYYY-MM-DD) to prevent UTC date shifting
+const toLocalISOString = (date) => {
+  const offset = date.getTimezoneOffset() * 60000;
+  const localDate = new Date(date.getTime() - offset);
+  return localDate.toISOString().split('T')[0];
 };
 
 const stringToColor = (str) => {
@@ -63,6 +62,14 @@ const GlobalStyles = () => (
     .glass-input:focus { background: #fff; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    
+    /* Strict Grid for Analytics Alignment */
+    .chart-row-grid {
+      display: grid;
+      grid-template-columns: 12rem 1fr 5rem; /* Name - Bar - Total */
+      align-items: center;
+      gap: 1rem;
+    }
   `}</style>
 );
 
@@ -70,7 +77,7 @@ const GlobalStyles = () => (
 function Modal({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <h3 className="font-bold text-lg text-slate-800">{title}</h3>
@@ -108,6 +115,7 @@ export default function App() {
           setLastProject(data.project_id); 
         } else {
           setActiveTimer(null);
+          // Auto-fetch last used project for "Resume" feature
           const lastRes = await authFetch('/entries?limit=1');
           if (lastRes.ok) {
             const entries = await lastRes.json();
@@ -199,6 +207,7 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuic
     <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full shadow-2xl z-20 shrink-0">
       <div className="p-8 flex items-center gap-3"><div className="bg-indigo-500 text-white p-2 rounded-lg"><Clock size={24} /></div><span className="font-extrabold text-2xl text-white">TimeApp</span></div>
       
+      {/* QUICK ACTIONS */}
       <div className="px-6 mb-2">
         <div className={`p-4 rounded-2xl flex flex-col gap-3 transition-all ${activeTimer ? 'bg-indigo-900/50 border border-indigo-500/30' : 'bg-slate-800/50 border border-slate-700'}`}>
            <div className="flex justify-between items-center">
@@ -207,7 +216,7 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuic
            </div>
            <div className="text-2xl font-mono font-bold text-white">{formatDuration(elapsed)}</div>
            <button onClick={onQuickToggle} className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${activeTimer ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
-             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> RESUME</>}
+             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> {lastProject ? 'RESUME' : 'START'}</>}
            </button>
         </div>
       </div>
@@ -255,7 +264,6 @@ function MainContent({ user, view, activeTimer, onTimerUpdate }) {
 function AnalyticsView({ trigger }) {
   const [data, setData] = useState([]);
   const [projects, setProjects] = useState([]);
-  
   const [currentDate, setCurrentDate] = useState(new Date()); 
   const [viewMode, setViewMode] = useState('month'); 
   const [selectedProjects, setSelectedProjects] = useState([]); 
@@ -271,19 +279,14 @@ function AnalyticsView({ trigger }) {
 
   useEffect(() => {
     let query = '?';
-    // Use getLocalDateString to ensure we send YYYY-MM-DD exactly as seen on the user's calendar
+    // Use toLocalISOString for accurate YYYY-MM-DD
     if (viewMode === 'month') {
       const y = currentDate.getFullYear(), m = currentDate.getMonth();
-      const start = new Date(y, m, 1);
-      const end = new Date(y, m + 1, 0); // Last day of month
-      query += `start=${getLocalDateString(start)}&end=${getLocalDateString(end)}&`;
+      query += `start=${toLocalISOString(new Date(y, m, 1))}&end=${toLocalISOString(new Date(y, m + 1, 0))}&`;
     } else if (viewMode === 'year') {
       const y = currentDate.getFullYear();
-      const start = new Date(y, 0, 1);
-      const end = new Date(y, 11, 31);
-      query += `start=${getLocalDateString(start)}&end=${getLocalDateString(end)}&`;
+      query += `start=${toLocalISOString(new Date(y, 0, 1))}&end=${toLocalISOString(new Date(y, 11, 31))}&`;
     }
-
     if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
     authFetch(`/analytics${query}`).then(r => r.json()).then(d => Array.isArray(d) ? setData(d) : setData([]));
   }, [trigger, viewMode, currentDate, selectedProjects]);
@@ -311,9 +314,9 @@ function AnalyticsView({ trigger }) {
       map[pName].total += hours;
       usersSet.add(item.user_name);
     });
-    
     const chartData = Object.values(map).sort((a,b) => b.total - a.total);
-    const maxTotal = Math.max(...chartData.map(d => d.total), 0);
+    // Calc Global Max for correct 100% width scaling
+    const maxTotal = Math.max(...chartData.map(d => d.total), 1); // Avoid div by zero
     return { chartData, users: Array.from(usersSet), maxTotal };
   }, [data]);
 
@@ -321,15 +324,15 @@ function AnalyticsView({ trigger }) {
     if (!data.length) return {};
     const map = {};
     data.forEach(item => { if (!map[item.user_name]) map[item.user_name] = []; map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) }); });
-    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours));
+    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours)); // SORT: Descending
     return map;
   }, [data]);
 
   return (
     <div className="space-y-8 max-w-7xl pb-20">
       
-      {/* HEADER */}
-      <div className="glass-panel p-3 rounded-2xl flex flex-wrap gap-4 items-center justify-between sticky top-0 z-30 bg-white/90 backdrop-blur-md">
+      {/* HEADER CONTROLS */}
+      <div className="glass-panel p-3 rounded-2xl flex flex-wrap gap-4 items-center justify-between sticky top-0 z-[50] bg-white/90 backdrop-blur-md shadow-sm">
         <div className="flex bg-slate-100 p-1 rounded-xl">
           {['all', 'year', 'month'].map(mode => (
             <button key={mode} onClick={() => setViewMode(mode)} className={`px-4 py-1.5 rounded-lg text-sm font-bold capitalize transition-all ${viewMode === mode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -348,13 +351,14 @@ function AnalyticsView({ trigger }) {
           </div>
         )}
 
+        {/* Improved Dropdown with High Z-Index */}
         <div className="relative" ref={filterRef}>
           <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${isFilterOpen || selectedProjects.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-            <Filter size={16}/> Filter Projects {selectedProjects.length > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[10px]">{selectedProjects.length}</span>} <ChevronDown size={14}/>
+            <Filter size={16}/> Filter {selectedProjects.length > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[10px]">{selectedProjects.length}</span>} <ChevronDown size={14}/>
           </button>
           
           {isFilterOpen && (
-            <div className="absolute right-0 top-14 bg-white p-3 rounded-2xl shadow-xl border border-slate-100 w-72 z-50 animate-in fade-in slide-in-from-top-2">
+            <div className="absolute right-0 top-14 bg-white p-3 rounded-2xl shadow-xl border border-slate-100 w-72 z-[100] animate-in fade-in slide-in-from-top-2">
                <div className="text-xs font-bold text-slate-400 uppercase mb-2 px-2">Select Projects</div>
                <div className="max-h-60 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
                  {projects.map(p => (
@@ -370,28 +374,27 @@ function AnalyticsView({ trigger }) {
         </div>
       </div>
 
-      {/* TEAM OVERVIEW - FIXED SCALE */}
+      {/* CHART 1: TEAM OVERVIEW (CSS Grid Alignment) */}
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><Activity className="text-indigo-600"/> Team Project Distribution</h3>
         {projectData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
           <div className="w-full">
-            <div className="flex text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
-              <div className="w-48">Project</div><div className="flex-1">Distribution</div><div className="w-24 text-right">Total</div>
+            <div className="chart-row-grid text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
+              <div>Project</div><div>Distribution</div><div className="text-right">Total</div>
             </div>
             <div className="space-y-3">
               {projectData.chartData.map((p) => (
-                <div key={p.name} className="flex items-center group">
-                  <div className="w-48 text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
+                <div key={p.name} className="chart-row-grid group">
+                  <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
                   
-                  {/* The Bar Area */}
-                  <div className="flex-1 h-8 bg-slate-100 rounded-lg overflow-hidden flex relative">
-                    {/* Container for segments, proportional to maxTotal */}
+                  {/* Container width based on Global Max Total */}
+                  <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative" style={{ width: '100%' }}>
+                    {/* Inner wrapper defines width relative to maxTotal */}
                     <div className="h-full flex" style={{ width: `${(p.total / projectData.maxTotal) * 100}%` }}>
                        {projectData.users.map(u => {
                          const hours = p[u] || 0;
                          if (hours === 0) return null;
-                         // Width is relative to THIS project's total
-                         const pct = (hours / p.total) * 100;
+                         const pct = (hours / p.total) * 100; // Segment width relative to project total
                          return (
                            <div key={u} style={{width: `${pct}%`, backgroundColor: stringToColor(u)}} className="h-full relative group/segment">
                               <div className="opacity-0 group-hover/segment:opacity-100 absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-1 rounded whitespace-nowrap z-10 pointer-events-none">{u}: {hours.toFixed(1)}h</div>
@@ -400,7 +403,7 @@ function AnalyticsView({ trigger }) {
                        })}
                     </div>
                   </div>
-                  <div className="w-24 text-right font-bold text-slate-800 text-sm pl-4">{p.total.toFixed(1)}h</div>
+                  <div className="text-right font-bold text-slate-800 text-sm pl-4">{p.total.toFixed(1)}h</div>
                 </div>
               ))}
             </div>
@@ -409,7 +412,7 @@ function AnalyticsView({ trigger }) {
         )}
       </div>
 
-      {/* INDIVIDUAL BREAKDOWNS - SORTED */}
+      {/* CHART 2: INDIVIDUAL BREAKDOWNS (Sorted) */}
       <div className="space-y-6">
          <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
          {Object.entries(userData).map(([userName, entries]) => (
@@ -421,13 +424,13 @@ function AnalyticsView({ trigger }) {
                </div>
                <div className="space-y-2">
                   {entries.map(e => (
-                    <div key={e.project} className="flex items-center">
-                       <div className="w-48 text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
-                       <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div key={e.project} className="chart-row-grid">
+                       <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
+                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
                           {/* Relative to this user's max project */}
                           <div style={{width: `${Math.min(100, (e.hours / Math.max(...entries.map(x=>x.hours))) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
                        </div>
-                       <div className="w-16 text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
+                       <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
                     </div>
                   ))}
                   {entries.length === 0 && <div className="text-sm text-slate-400 italic">No activity recorded.</div>}
@@ -461,7 +464,7 @@ function HistoryList({ trigger, onUpdate }) {
   useEffect(() => { if(editingEntry) authFetch('/projects').then(r=>r.json()).then(setProjects) }, [editingEntry]);
   const handleDelete = async (id) => { if(window.confirm('Delete entry?')) { await authFetch(`/entries/${id}`, { method: 'DELETE' }); onUpdate(); } };
   const handleSave = async (e) => { e.preventDefault(); const start = `${editingEntry.date}T${editingEntry.startTime}`; const end = `${editingEntry.date}T${editingEntry.endTime}`; await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, start, end }) }); setEditingEntry(null); onUpdate(); };
-  const openEdit = (e) => { const d = new Date(e.start_time); const endD = new Date(e.end_time); setEditingEntry({ id: e.id, project_id: e.project_id, date: getLocalDateString(d), startTime: d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}), endTime: endD.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}) }); };
+  const openEdit = (e) => { const d = new Date(e.start_time); const endD = new Date(e.end_time); setEditingEntry({ id: e.id, project_id: e.project_id, date: toLocalISOString(d), startTime: d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}), endTime: endD.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false}) }); };
   return (
     <><div className="glass-panel rounded-3xl overflow-hidden h-full flex flex-col"><div className="p-6 border-b border-slate-100 bg-white/50 flex justify-between items-center"><h3 className="font-bold text-slate-700">Recent Activity</h3><ArrowRight size={18} className="text-slate-400"/></div><div className="overflow-y-auto flex-1 p-2">{entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700">{e.project_name}</div><div className="text-xs text-slate-400 font-medium">{new Date(e.start_time).toLocaleDateString()} • {new Date(e.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => handleDelete(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}{entries.length === 0 && <div className="p-10 text-center text-slate-400">No recent entries.</div>}</div></div><Modal isOpen={!!editingEntry} onClose={() => setEditingEntry(null)} title="Edit Entry">{editingEntry && (<form onSubmit={handleSave} className="space-y-4"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project</label><select className="glass-input w-full p-3 rounded-xl" value={editingEntry.project_id} onChange={e => setEditingEntry({...editingEntry, project_id: e.target.value})}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Date</label><input type="date" className="glass-input w-full p-3 rounded-xl" value={editingEntry.date} onChange={e => setEditingEntry({...editingEntry, date: e.target.value})}/></div><div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Start</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.startTime} onChange={e => setEditingEntry({...editingEntry, startTime: e.target.value})}/></div><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">End</label><input type="time" className="glass-input w-full p-3 rounded-xl" value={editingEntry.endTime} onChange={e => setEditingEntry({...editingEntry, endTime: e.target.value})}/></div></div><button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4 flex justify-center gap-2"><Save size={18}/> Save Changes</button></form>)}</Modal></>
   );

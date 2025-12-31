@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Play, Square, Clock, Users, LogOut, BarChart3, Timer, FolderKanban, 
   Trash2, CalendarPlus, Mail, Lock, User, Shield, ShieldAlert, ArrowRight, 
-  Activity, Edit2, X, Save, Filter, Calendar, ChevronDown
+  Activity, Edit2, X, Save, Filter, ChevronDown, ChevronLeft, ChevronRight, Check
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -33,12 +33,10 @@ const formatDuration = (seconds) => {
   return `${h}:${m}:${s}`;
 };
 
-// Distinct Color Palette Generator (Consistent by String Hash)
+// Consistent Color Generator
 const stringToColor = (str) => {
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   const colors = [
     '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', 
     '#6366f1', '#84cc16', '#14b8a6', '#f43f5e', '#d946ef', '#e11d48', '#22c55e'
@@ -49,11 +47,11 @@ const stringToColor = (str) => {
 const GlobalStyles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-    body { background-color: #f3f4f6; margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; color: #1e293b; }
+    body { background-color: #f8fafc; margin: 0; font-family: 'Plus Jakarta Sans', sans-serif; color: #1e293b; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-    .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+    .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
     .glass-input { background: #f8fafc; border: 1px solid #e2e8f0; transition: all 0.2s; }
     .glass-input:focus { background: #fff; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
   `}</style>
@@ -75,11 +73,13 @@ function Modal({ isOpen, onClose, title, children }) {
   );
 }
 
+// --- MAIN APP ---
 export default function App() {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('tracker'); 
   const [loading, setLoading] = useState(true);
   const [activeTimer, setActiveTimer] = useState(null);
+  const [lastProject, setLastProject] = useState(null); // For "Resume" button
 
   useEffect(() => {
     const savedUser = localStorage.getItem('timeapp_user');
@@ -88,19 +88,43 @@ export default function App() {
     setLoading(false);
   }, []);
 
+  // Global Timer & "Last Project" detection
   useEffect(() => {
     if (!user) return;
     const checkTimer = async () => {
       const res = await authFetch('/entries/active');
       if (res && res.ok) {
         const data = await res.json();
-        setActiveTimer((data && data.id) ? data : null);
+        if (data && data.id) {
+          setActiveTimer(data);
+          setLastProject(data.project_id); // Remember for resume
+        } else {
+          setActiveTimer(null);
+          // If no active timer, fetch last entry to set "Resume" candidate
+          const lastRes = await authFetch('/entries?limit=1');
+          if (lastRes.ok) {
+            const entries = await lastRes.json();
+            if (entries.length > 0) setLastProject(entries[0].project_id);
+          }
+        }
       }
     };
     checkTimer();
     const interval = setInterval(checkTimer, 5000);
     return () => clearInterval(interval);
   }, [user]);
+
+  // Quick Action: Resume / Stop from Sidebar
+  const handleQuickToggle = async () => {
+    if (activeTimer) {
+      await authFetch('/entries/stop', { method: 'POST' });
+      setActiveTimer(null);
+    } else {
+      if (!lastProject) return alert("No recent project to resume. Start one from the tracker.");
+      const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: lastProject }) });
+      if (res.ok) setActiveTimer(await res.json());
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('timeapp_user');
@@ -110,21 +134,12 @@ export default function App() {
 
   if (loading) return <div className="h-screen flex items-center justify-center font-bold text-slate-400 animate-pulse">Loading TimeApp...</div>;
 
-  if (!user) return (
-    <>
-      <GlobalStyles />
-      <AuthScreen onLogin={(u, t) => { 
-        localStorage.setItem('timeapp_user', JSON.stringify(u)); 
-        localStorage.setItem('timeapp_token', t);
-        setUser(u); 
-      }} />
-    </>
-  );
+  if (!user) return <><GlobalStyles /><AuthScreen onLogin={(u, t) => { localStorage.setItem('timeapp_user', JSON.stringify(u)); localStorage.setItem('timeapp_token', t); setUser(u); }} /></>;
 
   return (
-    <div className="flex h-screen w-screen bg-slate-100 text-slate-800 overflow-hidden">
+    <div className="flex h-screen w-screen bg-slate-50 text-slate-800 overflow-hidden">
       <GlobalStyles />
-      <Sidebar user={user} activeView={currentView} onChangeView={setCurrentView} onLogout={handleLogout} activeTimer={activeTimer} />
+      <Sidebar user={user} activeView={currentView} onChangeView={setCurrentView} onLogout={handleLogout} activeTimer={activeTimer} onQuickToggle={handleQuickToggle} />
       <MainContent user={user} view={currentView} activeTimer={activeTimer} onTimerUpdate={setActiveTimer} />
     </div>
   );
@@ -164,7 +179,8 @@ function AuthScreen({ onLogin }) {
   );
 }
 
-function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer }) {
+// --- SIDEBAR (With Quick Actions) ---
+function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuickToggle }) {
   const isAdmin = user.role === 'admin';
   const [elapsed, setElapsed] = useState(0);
 
@@ -177,8 +193,23 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer }) {
   return (
     <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full shadow-2xl z-20 shrink-0">
       <div className="p-8 flex items-center gap-3"><div className="bg-indigo-500 text-white p-2 rounded-lg"><Clock size={24} /></div><span className="font-extrabold text-2xl text-white">TimeApp</span></div>
-      <nav className="flex-1 px-4 space-y-2 mt-2">
-        <div className="px-4 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 mt-4">Workspace</div>
+      
+      {/* QUICK TIMER CONTROL */}
+      <div className="px-6 mb-2">
+        <div className={`p-4 rounded-2xl flex flex-col gap-3 transition-all ${activeTimer ? 'bg-indigo-900/50 border border-indigo-500/30' : 'bg-slate-800/50 border border-slate-700'}`}>
+           <div className="flex justify-between items-center">
+             <span className="text-xs font-bold uppercase tracking-wide text-slate-400">{activeTimer ? 'Active Session' : 'Timer Idle'}</span>
+             {activeTimer && <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.6)]"></div>}
+           </div>
+           <div className="text-2xl font-mono font-bold text-white">{formatDuration(elapsed)}</div>
+           <button onClick={onQuickToggle} className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${activeTimer ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
+             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> RESUME</>}
+           </button>
+        </div>
+      </div>
+
+      <nav className="flex-1 px-4 space-y-2 mt-4 overflow-y-auto">
+        <div className="px-4 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Workspace</div>
         <NavItem icon={<Timer />} label="Tracker" isActive={activeView === 'tracker'} onClick={() => onChangeView('tracker')} />
         {isAdmin && <>
           <div className="px-4 text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 mt-8">Admin Console</div>
@@ -187,7 +218,7 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer }) {
           <NavItem icon={<Users />} label="Team" isActive={activeView === 'team'} onClick={() => onChangeView('team')} />
         </>}
       </nav>
-      {activeTimer && <div className="mx-6 mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex flex-col gap-2 animate-pulse"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 bg-red-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.6)]"></div><span className="text-xs font-bold text-red-400 uppercase tracking-wide">Tracking Time</span></div><div className="text-2xl font-mono font-bold text-white pl-4">{formatDuration(elapsed)}</div></div>}
+      
       <div className="p-6 border-t border-slate-800 bg-slate-900">
         <div className="flex items-center gap-3 mb-4"><div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-lg text-white font-bold">{user.avatar}</div><div className="overflow-hidden"><div className="text-sm font-bold text-white truncate">{user.name} {isAdmin && <Shield size={12} className="inline text-indigo-400" />}</div><div className="text-xs text-slate-500 truncate">{user.email}</div></div></div>
         <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:bg-slate-800 px-4 py-3 rounded-xl transition-all text-sm font-bold"><LogOut size={16}/> Log Out</button>
@@ -206,7 +237,7 @@ function MainContent({ user, view, activeTimer, onTimerUpdate }) {
 
   return (
     <main className="flex-1 p-8 md:p-12 overflow-y-auto bg-slate-100/50">
-      <header className="mb-10"><h2 className="text-3xl font-extrabold text-slate-900 tracking-tight capitalize">{view === 'analytics' ? 'Dashboard' : view}</h2></header>
+      <header className="mb-8"><h2 className="text-3xl font-extrabold text-slate-900 tracking-tight capitalize">{view === 'analytics' ? 'Dashboard' : view}</h2></header>
       {view === 'tracker' && <div className="max-w-6xl space-y-8"><TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update}/><div className="grid grid-cols-1 lg:grid-cols-3 gap-8"><div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update}/></div><div><ManualEntryCard onUpdate={update}/></div></div></div>}
       {view === 'analytics' && user.role === 'admin' && <AnalyticsView trigger={trigger}/>}
       {view === 'projects' && user.role === 'admin' && <ProjectsManager/>}
@@ -216,51 +247,67 @@ function MainContent({ user, view, activeTimer, onTimerUpdate }) {
   );
 }
 
-// --- UPGRADED ANALYTICS VIEW ---
+// --- ANALYTICS (Fixed UI & Navigation) ---
 function AnalyticsView({ trigger }) {
   const [data, setData] = useState([]);
   const [projects, setProjects] = useState([]);
   
-  // Filters State
-  const [range, setRange] = useState('all'); // 'all', 'month', 'year'
-  const [selectedProjects, setSelectedProjects] = useState([]); // Array of IDs
-  const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+  // Date State
+  const [currentDate, setCurrentDate] = useState(new Date()); // Tracks the currently viewed month/year
+  const [viewMode, setViewMode] = useState('month'); // 'month', 'year', 'all'
+  
+  // Filter State
+  const [selectedProjects, setSelectedProjects] = useState([]); 
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
 
-  // Load Metadata
+  // Close filter when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) { if (filterRef.current && !filterRef.current.contains(event.target)) setIsFilterOpen(false); }
+    document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   useEffect(() => { authFetch('/projects').then(r => r.json()).then(setProjects); }, []);
 
-  // Load Data with Filter Query
+  // Fetch Data with Date Filters
   useEffect(() => {
     let query = '?';
-    if (range === 'month') {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-      query += `start=${start}&end=${end}&`;
-    } else if (range === 'year') {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
-      const end = new Date(now.getFullYear(), 11, 31).toISOString().split('T')[0];
-      query += `start=${start}&end=${end}&`;
-    }
     
-    if (selectedProjects.length > 0) {
-      query += `projectIds=${selectedProjects.join(',')}`;
+    // Calculate start/end based on currentDate and viewMode
+    if (viewMode === 'month') {
+      const y = currentDate.getFullYear(), m = currentDate.getMonth();
+      const start = new Date(y, m, 1).toISOString().split('T')[0];
+      const end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+      query += `start=${start}&end=${end}&`;
+    } else if (viewMode === 'year') {
+      const y = currentDate.getFullYear();
+      const start = new Date(y, 0, 1).toISOString().split('T')[0];
+      const end = new Date(y, 11, 31).toISOString().split('T')[0];
+      query += `start=${start}&end=${end}&`;
     }
 
+    if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
+
     authFetch(`/analytics${query}`).then(r => r.json()).then(d => Array.isArray(d) ? setData(d) : setData([]));
-  }, [trigger, range, selectedProjects]);
+  }, [trigger, viewMode, currentDate, selectedProjects]);
+
+  // Navigation Handlers
+  const shiftDate = (amount) => {
+    const newDate = new Date(currentDate);
+    if (viewMode === 'month') newDate.setMonth(newDate.getMonth() + amount);
+    else newDate.setFullYear(newDate.getFullYear() + amount);
+    setCurrentDate(newDate);
+  };
 
   const toggleProject = (id) => {
     if (selectedProjects.includes(id)) setSelectedProjects(selectedProjects.filter(p => p !== id));
     else setSelectedProjects([...selectedProjects, id]);
   };
 
-  // Process Data
+  // Data Processing
   const projectData = useMemo(() => {
     if (!data.length) return { chartData: [], users: [] };
     const map = {}; const usersSet = new Set();
-    
     data.forEach(item => { 
       const pName = item.project_name || 'Unknown'; 
       if (!map[pName]) map[pName] = { name: pName, total: 0 }; 
@@ -269,7 +316,6 @@ function AnalyticsView({ trigger }) {
       map[pName].total += hours;
       usersSet.add(item.user_name);
     });
-
     return { chartData: Object.values(map).sort((a,b) => b.total - a.total), users: Array.from(usersSet) };
   }, [data]);
 
@@ -277,66 +323,123 @@ function AnalyticsView({ trigger }) {
     if (!data.length) return {};
     const map = {};
     data.forEach(item => { if (!map[item.user_name]) map[item.user_name] = []; map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) }); });
+    // Sort each user's projects by hours descending
+    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours));
     return map;
   }, [data]);
 
-  const chartHeight = Math.max(500, projectData.chartData.length * 80);
-
   return (
-    <div className="space-y-10 max-w-7xl pb-20">
+    <div className="space-y-8 max-w-7xl pb-20">
       
-      {/* FILTER TOOLBAR */}
-      <div className="glass-panel p-4 rounded-2xl flex flex-wrap gap-4 items-center justify-between">
-        <div className="flex gap-2">
-          {['all', 'month', 'year'].map(r => (
-            <button key={r} onClick={() => setRange(r)} className={`px-4 py-2 rounded-xl text-sm font-bold capitalize transition-all ${range === r ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
-              {r === 'all' ? 'All Time' : `This ${r}`}
+      {/* --- HEADER: CONTROLS --- */}
+      <div className="glass-panel p-3 rounded-2xl flex flex-wrap gap-4 items-center justify-between sticky top-0 z-30 bg-white/90 backdrop-blur-md">
+        
+        {/* View Mode Toggle */}
+        <div className="flex bg-slate-100 p-1 rounded-xl">
+          {['all', 'year', 'month'].map(mode => (
+            <button key={mode} onClick={() => setViewMode(mode)} className={`px-4 py-1.5 rounded-lg text-sm font-bold capitalize transition-all ${viewMode === mode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {mode === 'all' ? 'All Time' : mode}
             </button>
           ))}
         </div>
-        <div className="relative">
-          <button onClick={() => setIsProjectMenuOpen(!isProjectMenuOpen)} className="flex items-center gap-2 bg-white text-slate-600 px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 hover:bg-slate-50">
-            <Filter size={16}/> Filter Projects {selectedProjects.length > 0 && <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded text-xs">{selectedProjects.length}</span>} <ChevronDown size={14}/>
+
+        {/* Date Navigation (Only for Month/Year) */}
+        {viewMode !== 'all' && (
+          <div className="flex items-center gap-4 bg-white border border-slate-200 px-2 py-1.5 rounded-xl shadow-sm">
+            <button onClick={() => shiftDate(-1)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronLeft size={20}/></button>
+            <span className="font-bold text-slate-700 min-w-[140px] text-center select-none">
+              {viewMode === 'month' 
+                ? currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) 
+                : currentDate.getFullYear()}
+            </span>
+            <button onClick={() => shiftDate(1)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-500"><ChevronRight size={20}/></button>
+          </div>
+        )}
+
+        {/* Project Filter (Dropdown) */}
+        <div className="relative" ref={filterRef}>
+          <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${isFilterOpen || selectedProjects.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+            <Filter size={16}/> Filter Projects {selectedProjects.length > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[10px]">{selectedProjects.length}</span>} <ChevronDown size={14}/>
           </button>
-          {isProjectMenuOpen && (
-            <div className="absolute right-0 top-12 bg-white p-2 rounded-xl shadow-xl border border-slate-100 w-64 z-50">
-               {projects.map(p => (
-                 <div key={p.id} onClick={() => toggleProject(p.id)} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-lg cursor-pointer">
-                   <div className={`w-4 h-4 rounded border flex items-center justify-center ${selectedProjects.includes(p.id) ? 'bg-indigo-600 border-indigo-600' : 'border-slate-300'}`}>{selectedProjects.includes(p.id) && <div className="w-2 h-2 bg-white rounded-full"></div>}</div>
-                   <span className="text-sm font-medium text-slate-700 truncate">{p.name}</span>
-                 </div>
-               ))}
-               <div onClick={() => setSelectedProjects([])} className="border-t mt-2 pt-2 text-center text-xs text-indigo-500 font-bold cursor-pointer hover:underline">Clear Filter</div>
+          
+          {/* Dropdown Menu */}
+          {isFilterOpen && (
+            <div className="absolute right-0 top-14 bg-white p-3 rounded-2xl shadow-xl border border-slate-100 w-72 z-50 animate-in fade-in slide-in-from-top-2">
+               <div className="text-xs font-bold text-slate-400 uppercase mb-2 px-2">Select Projects</div>
+               <div className="max-h-60 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                 {projects.map(p => (
+                   <div key={p.id} onClick={() => toggleProject(p.id)} className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-colors ${selectedProjects.includes(p.id) ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-slate-50 text-slate-600'}`}>
+                     <div className="flex items-center gap-3">
+                       <div className="w-3 h-3 rounded-full" style={{backgroundColor: stringToColor(p.name)}}></div>
+                       <span className="text-sm font-medium truncate max-w-[160px]">{p.name}</span>
+                     </div>
+                     {selectedProjects.includes(p.id) && <Check size={14}/>}
+                   </div>
+                 ))}
+               </div>
+               {selectedProjects.length > 0 && <div onClick={() => setSelectedProjects([])} className="border-t border-slate-100 mt-2 pt-2 text-center text-xs text-red-500 font-bold cursor-pointer hover:underline">Clear Filters</div>}
             </div>
           )}
         </div>
       </div>
 
-      {/* 1. TEAM OVERVIEW */}
+      {/* --- CHART 1: TEAM OVERVIEW (Perfectly Aligned Columns) --- */}
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><Activity className="text-indigo-600"/> Team Project Distribution</h3>
-        <div style={{ height: chartHeight, width: '100%' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart layout="vertical" data={projectData.chartData} margin={{right: 50}} barSize={50} barGap={4}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={true} stroke="#e2e8f0"/>
-              <XAxis type="number" stroke="#94a3b8" tick={{fontSize: 12}}/>
-              <YAxis dataKey="name" type="category" stroke="#64748b" width={180} tick={{fontWeight: '700', fontSize: 13}} />
-              <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '12px', border:'none', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} />
-              <Legend wrapperStyle={{paddingTop: '20px'}}/>
-              {projectData.users.map((userName, i) => (
-                <Bar key={userName} dataKey={userName} stackId="a" fill={stringToColor(userName)}> {/* Use consistent user colors */}
-                   <LabelList dataKey={userName} position="center" style={{ fill: '#fff', fontSize: '11px', fontWeight: 'bold' }} formatter={(val) => val > 0.5 ? val : ''} />
-                </Bar>
+        
+        {projectData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
+          <div className="w-full">
+            {/* Header Row */}
+            <div className="flex text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
+              <div className="w-48">Project</div>
+              <div className="flex-1">Distribution</div>
+              <div className="w-24 text-right">Total</div>
+            </div>
+            
+            {/* Rows */}
+            <div className="space-y-3">
+              {projectData.chartData.map((p) => (
+                <div key={p.name} className="flex items-center group">
+                  {/* Col 1: Name */}
+                  <div className="w-48 text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
+                  
+                  {/* Col 2: The Stacked Bar */}
+                  <div className="flex-1 h-8 bg-slate-100 rounded-lg overflow-hidden flex relative">
+                    {/* Render segments */}
+                    {projectData.users.map(u => {
+                      const hours = p[u] || 0;
+                      if (hours === 0) return null;
+                      const pct = (hours / p.total) * 100;
+                      return (
+                        <div key={u} style={{width: `${pct}%`, backgroundColor: stringToColor(u)}} className="h-full relative group/segment">
+                           {/* Tooltip on hover */}
+                           <div className="opacity-0 group-hover/segment:opacity-100 absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-1 rounded whitespace-nowrap z-10 pointer-events-none">
+                             {u}: {hours.toFixed(1)}h
+                           </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Col 3: Total */}
+                  <div className="w-24 text-right font-bold text-slate-800 text-sm pl-4">{p.total.toFixed(1)}h</div>
+                </div>
               ))}
-              <Bar dataKey="total" stackId="b" fill="transparent" isAnimationActive={false}>
-                 <LabelList dataKey="total" position="right" style={{ fill: '#1e293b', fontSize: '14px', fontWeight: '900' }} formatter={(val) => `${val.toFixed(1)}h`} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-4 mt-8 pt-6 border-t border-slate-100">
+               {projectData.users.map(u => (
+                 <div key={u} className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                   <div className="w-3 h-3 rounded-full" style={{backgroundColor: stringToColor(u)}}></div> {u}
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 2. INDIVIDUAL BREAKDOWNS (Full Width Cards) */}
+      {/* --- CHART 2: INDIVIDUAL BREAKDOWNS (Sorted & Full Width) --- */}
       <div className="space-y-6">
          <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
          {Object.entries(userData).map(([userName, entries]) => (
@@ -344,21 +447,23 @@ function AnalyticsView({ trigger }) {
                <div className="flex items-center gap-4 mb-6 border-b border-slate-100 pb-4">
                   <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center"><User size={20}/></div>
                   <h4 className="font-bold text-lg text-slate-700">{userName}</h4>
+                  <div className="ml-auto font-mono font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-lg text-sm">
+                    Total: {entries.reduce((a,b)=>a+b.hours,0).toFixed(1)}h
+                  </div>
                </div>
-               {/* Same height as main chart logic if you wanted, but usually individual charts are shorter */}
-               <div style={{ height: Math.max(150, entries.length * 60) }}> 
-                  <ResponsiveContainer width="100%" height="100%">
-                     <BarChart layout="vertical" data={entries} margin={{right: 60}} barSize={30}>
-                        <CartesianGrid horizontal={false} stroke="#f1f5f9"/>
-                        <XAxis type="number" hide/>
-                        <YAxis dataKey="project" type="category" width={180} tick={{fontSize: 13, fontWeight: '600', fill: '#64748b'}} tickLine={false} axisLine={false} />
-                        <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '8px', border:'none', boxShadow:'0 4px 6px -1px rgba(0,0,0,0.1)'}}/>
-                        <Bar dataKey="hours" radius={[0, 6, 6, 0]}>
-                           {entries.map((entry, index) => <Cell key={`cell-${index}`} fill={stringToColor(entry.project)} />)} {/* Project Colors */}
-                           <LabelList dataKey="hours" position="right" style={{ fill: '#334155', fontSize: '13px', fontWeight: '800' }} formatter={(val) => `${val}h`} />
-                        </Bar>
-                     </BarChart>
-                  </ResponsiveContainer>
+               {/* HTML-based Bar Chart for Perfect Alignment */}
+               <div className="space-y-2">
+                  {entries.map(e => (
+                    <div key={e.project} className="flex items-center">
+                       <div className="w-48 text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
+                       <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                          {/* Calculate width relative to max in this user's list (approx) or just relative to max entry */}
+                          <div style={{width: `${Math.min(100, (e.hours / Math.max(...entries.map(x=>x.hours))) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
+                       </div>
+                       <div className="w-16 text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
+                    </div>
+                  ))}
+                  {entries.length === 0 && <div className="text-sm text-slate-400 italic">No activity recorded.</div>}
                </div>
             </div>
          ))}
@@ -367,7 +472,7 @@ function AnalyticsView({ trigger }) {
   );
 }
 
-// --- OTHER COMPONENTS (Unchanged, just concise) ---
+// --- OTHER COMPONENTS (TimeTrackerCard, HistoryList, etc.) ---
 function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh }) {
   const [projects, setProjects] = useState([]); const [proj, setProj] = useState(''); const [elapsed, setElapsed] = useState(0);
   useEffect(() => { authFetch('/projects').then(r=>r.json()).then(setProjects) }, []);
@@ -407,7 +512,7 @@ function ProjectsManager() {
   useEffect(() => { authFetch('/projects').then(r=>r.json()).then(setProjects) }, []);
   const refresh = () => authFetch('/projects').then(r=>r.json()).then(setProjects);
   const add = async (e) => { e.preventDefault(); await authFetch('/projects', { method:'POST', body:JSON.stringify({name, color:'#333'}) }); setName(''); refresh(); };
-  const del = async (id) => { if(window.confirm('Delete project? This will delete all associated time entries.')) { await authFetch(`/projects/${id}`, { method: 'DELETE' }); refresh(); } };
+  const del = async (id) => { if(window.confirm('Delete project?')) { await authFetch(`/projects/${id}`, { method: 'DELETE' }); refresh(); } };
   const handleSave = async (e) => { e.preventDefault(); await authFetch(`/projects/${editingProject.id}`, { method: 'PUT', body: JSON.stringify({ name: editingProject.name, color: editingProject.color }) }); setEditingProject(null); refresh(); };
   return (
     <><div className="glass-panel p-8 rounded-3xl max-w-4xl"><h3 className="font-bold text-slate-700 mb-6 text-xl">Projects</h3><form onSubmit={add} className="flex gap-4 mb-8"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold outline-none" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold shadow-lg shadow-indigo-200">Create</button></form><div className="grid gap-3">{projects.map(p=><div key={p.id} className="p-4 rounded-xl bg-white border border-slate-100 flex justify-between items-center group hover:shadow-md transition-all"><span className="font-bold text-slate-700">{p.name}</span><div className="flex gap-2"><button onClick={() => setEditingProject(p)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button><button onClick={() => del(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button></div></div>)}</div></div><Modal isOpen={!!editingProject} onClose={() => setEditingProject(null)} title="Edit Project">{editingProject && (<form onSubmit={handleSave} className="space-y-4"><div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Project Name</label><input className="glass-input w-full p-3 rounded-xl" value={editingProject.name} onChange={e => setEditingProject({...editingProject, name: e.target.value})}/></div><button className="w-full bg-indigo-600 text-white p-3 rounded-xl font-bold mt-4 flex justify-center gap-2"><Save size={18}/> Update Project</button></form>)}</Modal></>

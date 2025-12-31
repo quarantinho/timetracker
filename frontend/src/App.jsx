@@ -11,36 +11,46 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// --- UTILS ---
+// --- ROBUST UTILS (Prevents Grey Screen Crashes) ---
 const authFetch = async (endpoint, options = {}) => {
-  const token = localStorage.getItem('timeapp_token');
-  const headers = { ...options.headers, 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
-  const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  if (res.status === 401 || res.status === 403) {
-    localStorage.removeItem('timeapp_token');
-    window.location.reload();
-    return null;
+  try {
+    const token = localStorage.getItem('timeapp_token');
+    const headers = { ...options.headers, 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+    const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    
+    if (res.status === 401 || res.status === 403) {
+      localStorage.removeItem('timeapp_token');
+      // Return a dummy object so .json() calls don't crash the app before reload
+      return { ok: false, status: res.status, json: async () => ({}) }; 
+    }
+    
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) return res;
+    return { ok: res.ok, status: res.status, json: async () => ({}) };
+  } catch (err) {
+    console.error("Fetch error:", err);
+    return { ok: false, status: 500, json: async () => ({}) };
   }
-  const contentType = res.headers.get("content-type");
-  if (contentType && contentType.includes("application/json")) return res;
-  return { ok: res.ok, status: res.status, json: async () => ({}) };
 };
 
 const formatDuration = (seconds) => {
+  if (isNaN(seconds)) return "00:00:00";
   const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
   const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
   return `${h}:${m}:${s}`;
 };
 
-// FIX: Generate Local Date String (YYYY-MM-DD) to prevent UTC date shifting
+// FIX: Generate Local Date String (YYYY-MM-DD) avoiding UTC shifts
 const toLocalISOString = (date) => {
+  if (!date) return new Date().toISOString().split('T')[0];
   const offset = date.getTimezoneOffset() * 60000;
   const localDate = new Date(date.getTime() - offset);
   return localDate.toISOString().split('T')[0];
 };
 
 const stringToColor = (str) => {
+  if (!str) return '#cbd5e1';
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   const colors = [
@@ -63,12 +73,13 @@ const GlobalStyles = () => (
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     
-    /* Strict Grid for Analytics Alignment */
-    .chart-row-grid {
+    /* STRICT GRID for Alignment */
+    .chart-grid-row {
       display: grid;
-      grid-template-columns: 12rem 1fr 5rem; /* Name - Bar - Total */
+      grid-template-columns: 180px 1fr 80px; /* Fixed Name Width | Flexible Bar | Fixed Total Width */
       align-items: center;
-      gap: 1rem;
+      gap: 16px;
+      margin-bottom: 12px;
     }
   `}</style>
 );
@@ -98,9 +109,11 @@ export default function App() {
   const [lastProject, setLastProject] = useState(null); 
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('timeapp_user');
-    const token = localStorage.getItem('timeapp_token');
-    if (savedUser && token) setUser(JSON.parse(savedUser));
+    try {
+      const savedUser = localStorage.getItem('timeapp_user');
+      const token = localStorage.getItem('timeapp_token');
+      if (savedUser && token) setUser(JSON.parse(savedUser));
+    } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
 
@@ -115,11 +128,10 @@ export default function App() {
           setLastProject(data.project_id); 
         } else {
           setActiveTimer(null);
-          // Auto-fetch last used project for "Resume" feature
           const lastRes = await authFetch('/entries?limit=1');
           if (lastRes.ok) {
             const entries = await lastRes.json();
-            if (entries.length > 0) setLastProject(entries[0].project_id);
+            if (entries && entries.length > 0) setLastProject(entries[0].project_id);
           }
         }
       }
@@ -134,7 +146,7 @@ export default function App() {
       await authFetch('/entries/stop', { method: 'POST' });
       setActiveTimer(null);
     } else {
-      if (!lastProject) return alert("No recent project to resume. Start one from the tracker.");
+      if (!lastProject) return alert("No recent project. Start one from the tracker.");
       const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: lastProject }) });
       if (res.ok) setActiveTimer(await res.json());
     }
@@ -207,7 +219,6 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuic
     <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col hidden md:flex h-full shadow-2xl z-20 shrink-0">
       <div className="p-8 flex items-center gap-3"><div className="bg-indigo-500 text-white p-2 rounded-lg"><Clock size={24} /></div><span className="font-extrabold text-2xl text-white">TimeApp</span></div>
       
-      {/* QUICK ACTIONS */}
       <div className="px-6 mb-2">
         <div className={`p-4 rounded-2xl flex flex-col gap-3 transition-all ${activeTimer ? 'bg-indigo-900/50 border border-indigo-500/30' : 'bg-slate-800/50 border border-slate-700'}`}>
            <div className="flex justify-between items-center">
@@ -216,7 +227,7 @@ function Sidebar({ user, activeView, onChangeView, onLogout, activeTimer, onQuic
            </div>
            <div className="text-2xl font-mono font-bold text-white">{formatDuration(elapsed)}</div>
            <button onClick={onQuickToggle} className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${activeTimer ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
-             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> {lastProject ? 'RESUME' : 'START'}</>}
+             {activeTimer ? <><Square size={14} fill="currentColor"/> STOP</> : <><Play size={14} fill="currentColor"/> {activeTimer ? 'RESUME' : 'RESUME'}</>}
            </button>
         </div>
       </div>
@@ -315,8 +326,8 @@ function AnalyticsView({ trigger }) {
       usersSet.add(item.user_name);
     });
     const chartData = Object.values(map).sort((a,b) => b.total - a.total);
-    // Calc Global Max for correct 100% width scaling
-    const maxTotal = Math.max(...chartData.map(d => d.total), 1); // Avoid div by zero
+    // Find Max total to scale bars correctly (avoid 100% width for small values)
+    const maxTotal = Math.max(...chartData.map(d => d.total), 1); 
     return { chartData, users: Array.from(usersSet), maxTotal };
   }, [data]);
 
@@ -324,14 +335,15 @@ function AnalyticsView({ trigger }) {
     if (!data.length) return {};
     const map = {};
     data.forEach(item => { if (!map[item.user_name]) map[item.user_name] = []; map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) }); });
-    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours)); // SORT: Descending
+    // Sort Descending
+    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours));
     return map;
   }, [data]);
 
   return (
     <div className="space-y-8 max-w-7xl pb-20">
       
-      {/* HEADER CONTROLS */}
+      {/* CONTROLS */}
       <div className="glass-panel p-3 rounded-2xl flex flex-wrap gap-4 items-center justify-between sticky top-0 z-[50] bg-white/90 backdrop-blur-md shadow-sm">
         <div className="flex bg-slate-100 p-1 rounded-xl">
           {['all', 'year', 'month'].map(mode => (
@@ -351,7 +363,6 @@ function AnalyticsView({ trigger }) {
           </div>
         )}
 
-        {/* Improved Dropdown with High Z-Index */}
         <div className="relative" ref={filterRef}>
           <button onClick={() => setIsFilterOpen(!isFilterOpen)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border transition-all ${isFilterOpen || selectedProjects.length > 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
             <Filter size={16}/> Filter {selectedProjects.length > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[10px]">{selectedProjects.length}</span>} <ChevronDown size={14}/>
@@ -374,27 +385,27 @@ function AnalyticsView({ trigger }) {
         </div>
       </div>
 
-      {/* CHART 1: TEAM OVERVIEW (CSS Grid Alignment) */}
+      {/* TEAM OVERVIEW - FIXED GRID ALIGNMENT */}
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><Activity className="text-indigo-600"/> Team Project Distribution</h3>
         {projectData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
           <div className="w-full">
-            <div className="chart-row-grid text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
+            <div className="chart-grid-row text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-2">
               <div>Project</div><div>Distribution</div><div className="text-right">Total</div>
             </div>
             <div className="space-y-3">
               {projectData.chartData.map((p) => (
-                <div key={p.name} className="chart-row-grid group">
+                <div key={p.name} className="chart-grid-row group">
                   <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
                   
-                  {/* Container width based on Global Max Total */}
-                  <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative" style={{ width: '100%' }}>
-                    {/* Inner wrapper defines width relative to maxTotal */}
+                  {/* BAR CONTAINER: Width = 100% of the middle grid column */}
+                  <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative w-full">
+                    {/* SCALED WRAPPER: Width proportional to Max Total */}
                     <div className="h-full flex" style={{ width: `${(p.total / projectData.maxTotal) * 100}%` }}>
                        {projectData.users.map(u => {
                          const hours = p[u] || 0;
                          if (hours === 0) return null;
-                         const pct = (hours / p.total) * 100; // Segment width relative to project total
+                         const pct = (hours / p.total) * 100; 
                          return (
                            <div key={u} style={{width: `${pct}%`, backgroundColor: stringToColor(u)}} className="h-full relative group/segment">
                               <div className="opacity-0 group-hover/segment:opacity-100 absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-1 rounded whitespace-nowrap z-10 pointer-events-none">{u}: {hours.toFixed(1)}h</div>
@@ -403,7 +414,8 @@ function AnalyticsView({ trigger }) {
                        })}
                     </div>
                   </div>
-                  <div className="text-right font-bold text-slate-800 text-sm pl-4">{p.total.toFixed(1)}h</div>
+                  
+                  <div className="text-right font-bold text-slate-800 text-sm">{p.total.toFixed(1)}h</div>
                 </div>
               ))}
             </div>
@@ -412,7 +424,7 @@ function AnalyticsView({ trigger }) {
         )}
       </div>
 
-      {/* CHART 2: INDIVIDUAL BREAKDOWNS (Sorted) */}
+      {/* INDIVIDUAL BREAKDOWNS - SORTED & GRID ALIGNED */}
       <div className="space-y-6">
          <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
          {Object.entries(userData).map(([userName, entries]) => (
@@ -424,12 +436,14 @@ function AnalyticsView({ trigger }) {
                </div>
                <div className="space-y-2">
                   {entries.map(e => (
-                    <div key={e.project} className="chart-row-grid">
+                    <div key={e.project} className="chart-grid-row">
                        <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
+                       
                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
                           {/* Relative to this user's max project */}
                           <div style={{width: `${Math.min(100, (e.hours / Math.max(...entries.map(x=>x.hours))) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
                        </div>
+                       
                        <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
                     </div>
                   ))}

@@ -2,16 +2,39 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Play, Square, Clock, Users, LogOut, BarChart3, Timer, FolderKanban, 
   Trash2, CalendarPlus, Mail, Lock, User, Shield, ShieldAlert, ArrowRight, 
-  Activity, Edit2, X, Save, Filter, ChevronDown, ChevronLeft, ChevronRight, Check
+  Activity, Edit2, X, Save, Filter, ChevronDown, ChevronLeft, ChevronRight, Check, AlertTriangle
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Legend, LabelList, Cell 
+  Cell, LabelList 
 } from 'recharts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// --- ROBUST UTILS (Prevents Grey Screen Crashes) ---
+// --- ERROR BOUNDARY (Prevents Grey Screen of Death) ---
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, errorInfo) { console.error("Uncaught error:", error, errorInfo); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-800 p-8 text-center">
+          <AlertTriangle size={48} className="text-red-500 mb-4" />
+          <h1 className="text-2xl font-bold mb-2">Something went wrong.</h1>
+          <p className="text-slate-500 mb-6">The application encountered an unexpected error.</p>
+          <pre className="bg-slate-200 p-4 rounded text-xs text-left mb-6 overflow-auto max-w-lg">
+            {this.state.error && this.state.error.toString()}
+          </pre>
+          <button onClick={() => window.location.reload()} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-indigo-700">Reload Application</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// --- UTILS ---
 const authFetch = async (endpoint, options = {}) => {
   try {
     const token = localStorage.getItem('timeapp_token');
@@ -20,28 +43,27 @@ const authFetch = async (endpoint, options = {}) => {
     
     if (res.status === 401 || res.status === 403) {
       localStorage.removeItem('timeapp_token');
-      // Return a dummy object so .json() calls don't crash the app before reload
-      return { ok: false, status: res.status, json: async () => ({}) }; 
+      // Return safe dummy object to prevent immediate crashes
+      return { ok: false, status: res.status, json: async () => ({}) };
     }
     
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.includes("application/json")) return res;
     return { ok: res.ok, status: res.status, json: async () => ({}) };
   } catch (err) {
-    console.error("Fetch error:", err);
+    console.error("Network Error:", err);
     return { ok: false, status: 500, json: async () => ({}) };
   }
 };
 
 const formatDuration = (seconds) => {
-  if (isNaN(seconds)) return "00:00:00";
+  if (!seconds || isNaN(seconds)) return "00:00:00";
   const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
   const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
   return `${h}:${m}:${s}`;
 };
 
-// FIX: Generate Local Date String (YYYY-MM-DD) avoiding UTC shifts
 const toLocalISOString = (date) => {
   if (!date) return new Date().toISOString().split('T')[0];
   const offset = date.getTimezoneOffset() * 60000;
@@ -50,7 +72,7 @@ const toLocalISOString = (date) => {
 };
 
 const stringToColor = (str) => {
-  if (!str) return '#cbd5e1';
+  if (!str) return '#94a3b8';
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   const colors = [
@@ -73,10 +95,10 @@ const GlobalStyles = () => (
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     
-    /* STRICT GRID for Alignment */
+    /* Strict Grid for Analytics Alignment */
     .chart-grid-row {
       display: grid;
-      grid-template-columns: 180px 1fr 80px; /* Fixed Name Width | Flexible Bar | Fixed Total Width */
+      grid-template-columns: 180px 1fr 80px; 
       align-items: center;
       gap: 16px;
       margin-bottom: 12px;
@@ -88,7 +110,7 @@ const GlobalStyles = () => (
 function Modal({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <h3 className="font-bold text-lg text-slate-800">{title}</h3>
@@ -102,6 +124,14 @@ function Modal({ isOpen, onClose, title, children }) {
 
 // --- MAIN APP ---
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('tracker'); 
   const [loading, setLoading] = useState(true);
@@ -113,7 +143,7 @@ export default function App() {
       const savedUser = localStorage.getItem('timeapp_user');
       const token = localStorage.getItem('timeapp_token');
       if (savedUser && token) setUser(JSON.parse(savedUser));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Auth load error", e); }
     setLoading(false);
   }, []);
 
@@ -271,7 +301,7 @@ function MainContent({ user, view, activeTimer, onTimerUpdate }) {
   );
 }
 
-// --- FIXED ANALYTICS VIEW ---
+// --- ANALYTICS VIEW (Safeguarded against crashes) ---
 function AnalyticsView({ trigger }) {
   const [data, setData] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -290,16 +320,21 @@ function AnalyticsView({ trigger }) {
 
   useEffect(() => {
     let query = '?';
-    // Use toLocalISOString for accurate YYYY-MM-DD
-    if (viewMode === 'month') {
-      const y = currentDate.getFullYear(), m = currentDate.getMonth();
-      query += `start=${toLocalISOString(new Date(y, m, 1))}&end=${toLocalISOString(new Date(y, m + 1, 0))}&`;
-    } else if (viewMode === 'year') {
-      const y = currentDate.getFullYear();
-      query += `start=${toLocalISOString(new Date(y, 0, 1))}&end=${toLocalISOString(new Date(y, 11, 31))}&`;
-    }
-    if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
-    authFetch(`/analytics${query}`).then(r => r.json()).then(d => Array.isArray(d) ? setData(d) : setData([]));
+    try {
+      if (viewMode === 'month') {
+        const y = currentDate.getFullYear(), m = currentDate.getMonth();
+        query += `start=${toLocalISOString(new Date(y, m, 1))}&end=${toLocalISOString(new Date(y, m + 1, 0))}&`;
+      } else if (viewMode === 'year') {
+        const y = currentDate.getFullYear();
+        query += `start=${toLocalISOString(new Date(y, 0, 1))}&end=${toLocalISOString(new Date(y, 11, 31))}&`;
+      }
+      if (selectedProjects.length > 0) query += `projectIds=${selectedProjects.join(',')}`;
+      
+      authFetch(`/analytics${query}`).then(r => r.json()).then(d => {
+        if (Array.isArray(d)) setData(d);
+        else setData([]); 
+      });
+    } catch (e) { console.error("Analytics fetch error", e); setData([]); }
   }, [trigger, viewMode, currentDate, selectedProjects]);
 
   const shiftDate = (amount) => {
@@ -315,18 +350,20 @@ function AnalyticsView({ trigger }) {
   };
 
   const projectData = useMemo(() => {
-    if (!data.length) return { chartData: [], users: [], maxTotal: 0 };
+    if (!data.length) return { chartData: [], users: [], maxTotal: 1 };
     const map = {}; const usersSet = new Set();
+    
     data.forEach(item => { 
       const pName = item.project_name || 'Unknown'; 
       if (!map[pName]) map[pName] = { name: pName, total: 0 }; 
-      const hours = Number(item.hours);
+      const hours = Number(item.hours) || 0;
       map[pName][item.user_name] = hours;
       map[pName].total += hours;
       usersSet.add(item.user_name);
     });
+    
     const chartData = Object.values(map).sort((a,b) => b.total - a.total);
-    // Find Max total to scale bars correctly (avoid 100% width for small values)
+    // CRITICAL FIX: Ensure maxTotal is never 0 to prevent division by zero (Infinity -> NaN -> Crash)
     const maxTotal = Math.max(...chartData.map(d => d.total), 1); 
     return { chartData, users: Array.from(usersSet), maxTotal };
   }, [data]);
@@ -334,16 +371,22 @@ function AnalyticsView({ trigger }) {
   const userData = useMemo(() => {
     if (!data.length) return {};
     const map = {};
-    data.forEach(item => { if (!map[item.user_name]) map[item.user_name] = []; map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) }); });
-    // Sort Descending
-    Object.keys(map).forEach(u => map[u].sort((a,b) => b.hours - a.hours));
+    data.forEach(item => { 
+      if (!map[item.user_name]) map[item.user_name] = []; 
+      map[item.user_name].push({ project: item.project_name, hours: Number(item.hours) || 0 }); 
+    });
+    // Sort Descending & Calc Max for each user to prevent crashes
+    Object.keys(map).forEach(u => {
+      map[u].sort((a,b) => b.hours - a.hours);
+      map[u].max = Math.max(...map[u].map(x => x.hours), 1);
+    });
     return map;
   }, [data]);
 
   return (
     <div className="space-y-8 max-w-7xl pb-20">
       
-      {/* CONTROLS */}
+      {/* HEADER CONTROLS */}
       <div className="glass-panel p-3 rounded-2xl flex flex-wrap gap-4 items-center justify-between sticky top-0 z-[50] bg-white/90 backdrop-blur-md shadow-sm">
         <div className="flex bg-slate-100 p-1 rounded-xl">
           {['all', 'year', 'month'].map(mode => (
@@ -385,7 +428,7 @@ function AnalyticsView({ trigger }) {
         </div>
       </div>
 
-      {/* TEAM OVERVIEW - FIXED GRID ALIGNMENT */}
+      {/* TEAM OVERVIEW - FIXED GRID & SAFE MATH */}
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="font-bold text-xl text-slate-800 mb-6 flex items-center gap-2"><Activity className="text-indigo-600"/> Team Project Distribution</h3>
         {projectData.chartData.length === 0 ? <div className="text-center p-10 text-slate-400">No data for this period.</div> : (
@@ -398,9 +441,9 @@ function AnalyticsView({ trigger }) {
                 <div key={p.name} className="chart-grid-row group">
                   <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
                   
-                  {/* BAR CONTAINER: Width = 100% of the middle grid column */}
+                  {/* BAR CONTAINER */}
                   <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative w-full">
-                    {/* SCALED WRAPPER: Width proportional to Max Total */}
+                    {/* SCALED WRAPPER */}
                     <div className="h-full flex" style={{ width: `${(p.total / projectData.maxTotal) * 100}%` }}>
                        {projectData.users.map(u => {
                          const hours = p[u] || 0;
@@ -424,7 +467,7 @@ function AnalyticsView({ trigger }) {
         )}
       </div>
 
-      {/* INDIVIDUAL BREAKDOWNS - SORTED & GRID ALIGNED */}
+      {/* INDIVIDUAL BREAKDOWNS - SAFE MATH */}
       <div className="space-y-6">
          <h3 className="font-bold text-xl text-slate-800 px-2">Individual Performance</h3>
          {Object.entries(userData).map(([userName, entries]) => (
@@ -440,8 +483,8 @@ function AnalyticsView({ trigger }) {
                        <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
                        
                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
-                          {/* Relative to this user's max project */}
-                          <div style={{width: `${Math.min(100, (e.hours / Math.max(...entries.map(x=>x.hours))) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
+                          {/* Use Pre-calculated Max to avoid NaN */}
+                          <div style={{width: `${Math.min(100, (e.hours / userData[userName].max) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
                        </div>
                        
                        <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>

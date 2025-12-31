@@ -3,7 +3,7 @@ import {
   Play, Square, Clock, Users, LogOut, BarChart3, Timer, FolderKanban, 
   Trash2, CalendarPlus, Mail, Lock, User, Shield, ShieldAlert, ArrowRight, 
   Activity, Edit2, X, Save, Filter, ChevronDown, ChevronLeft, ChevronRight, 
-  Check, AlertTriangle, Settings, Eye, EyeOff
+  Check, AlertTriangle, Settings, Eye, EyeOff, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -94,11 +94,16 @@ const GlobalStyles = () => (
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .chart-grid-row { display: grid; grid-template-columns: 180px 1fr 80px; align-items: center; gap: 16px; margin-bottom: 12px; }
+    
+    /* Toast Animation */
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .toast-anim { animation: slideIn 0.3s ease-out forwards; }
   `}</style>
 );
 
 // --- SHARED COMPONENTS ---
 
+// 1. Standard Modal
 function Modal({ isOpen, onClose, title, children }) {
   if (!isOpen) return null;
   return (
@@ -110,6 +115,37 @@ function Modal({ isOpen, onClose, title, children }) {
         </div>
         <div className="p-6">{children}</div>
       </div>
+    </div>
+  );
+}
+
+// 2. Confirmation Modal (Red/Destructive)
+function ConfirmModal({ isOpen, onClose, onConfirm, title, message }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200 border-2 border-red-100">
+        <div className="p-6 text-center">
+          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500"><AlertTriangle size={24}/></div>
+          <h3 className="text-lg font-bold text-slate-800 mb-2">{title}</h3>
+          <p className="text-slate-500 text-sm mb-6">{message}</p>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
+            <button onClick={() => { onConfirm(); onClose(); }} className="flex-1 py-2.5 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-200 transition-colors">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 3. Toast Notification
+function Toast({ message, type, onClose }) {
+  useEffect(() => { const timer = setTimeout(onClose, 3000); return () => clearTimeout(timer); }, [onClose]);
+  return (
+    <div className={`fixed top-6 right-6 z-[300] toast-anim flex items-center gap-3 px-6 py-4 rounded-xl shadow-xl border ${type === 'error' ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800'}`}>
+      {type === 'error' ? <AlertCircle size={20}/> : <CheckCircle2 size={20}/>}
+      <span className="font-bold text-sm">{message}</span>
     </div>
   );
 }
@@ -134,7 +170,7 @@ const PasswordInput = ({ placeholder, value, onChange }) => {
   );
 };
 
-// --- MAIN APP STRUCTURE ---
+// --- MAIN APP CORE ---
 
 export default function App() {
   return (
@@ -150,6 +186,9 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [activeTimer, setActiveTimer] = useState(null);
   const [lastProject, setLastProject] = useState(null); 
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, type = 'success') => setToast({ message: msg, type });
 
   useEffect(() => {
     try {
@@ -188,10 +227,14 @@ function AppContent() {
     if (activeTimer) {
       await authFetch('/entries/stop', { method: 'POST' });
       setActiveTimer(null);
+      showToast("Timer Stopped");
     } else {
-      if (!lastProject) return alert("No recent project. Start one from the tracker.");
+      if (!lastProject) return showToast("No recent project to resume.", "error");
       const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: lastProject }) });
-      if (res.ok) setActiveTimer(await res.json());
+      if (res.ok) {
+        setActiveTimer(await res.json());
+        showToast("Timer Resumed");
+      }
     }
   };
 
@@ -208,8 +251,9 @@ function AppContent() {
   return (
     <div className="flex h-screen w-screen bg-slate-50 text-slate-800 overflow-hidden">
       <GlobalStyles />
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <Sidebar user={user} activeView={currentView} onChangeView={setCurrentView} onLogout={handleLogout} activeTimer={activeTimer} onQuickToggle={handleQuickToggle} />
-      <MainContent user={user} setUser={setUser} view={currentView} activeTimer={activeTimer} onTimerUpdate={setActiveTimer} />
+      <MainContent user={user} setUser={setUser} view={currentView} activeTimer={activeTimer} onTimerUpdate={setActiveTimer} showToast={showToast} />
     </div>
   );
 }
@@ -224,10 +268,10 @@ function AuthScreen({ onLogin }) {
     const endpoint = isRegister ? '/auth/register' : '/auth/login';
     try {
       const res = await fetch(`${API_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) });
-      let data; const ct = res.headers.get("content-type");
-      if (ct && ct.includes("application/json")) data = await res.json(); else data = await res.text();
+      let data; const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) data = await res.json(); else data = await res.text();
       if (!res.ok) throw new Error(typeof data === 'string' ? data : 'Authentication failed');
-      if (isRegister) { setIsRegister(false); setError('Account created! Please log in.'); } else onLogin(data.user, data.token);
+      if (isRegister) { setIsRegister(false); setError('Account created! Check your email.'); } else onLogin(data.user, data.token);
     } catch (err) { setError(err.message); }
   };
 
@@ -301,7 +345,7 @@ function NavItem({ icon, label, isActive, onClick }) {
   return <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-200 ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>{React.cloneElement(icon, { size: 18, strokeWidth: 2.5 })} {label}</button>;
 }
 
-function MainContent({ user, setUser, view, activeTimer, onTimerUpdate }) {
+function MainContent({ user, setUser, view, activeTimer, onTimerUpdate, showToast }) {
   const [trigger, setTrigger] = useState(0);
   const update = () => { setTrigger(t => t + 1); };
 
@@ -309,36 +353,47 @@ function MainContent({ user, setUser, view, activeTimer, onTimerUpdate }) {
     <main className="flex-1 p-8 md:p-12 overflow-y-auto bg-slate-100/50">
       <header className="mb-8"><h2 className="text-3xl font-extrabold text-slate-900 tracking-tight capitalize">{view === 'analytics' ? 'Dashboard' : view}</h2></header>
       
-      {view === 'tracker' && <div className="max-w-6xl space-y-8"><TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update}/><div className="grid grid-cols-1 lg:grid-cols-3 gap-8"><div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update}/></div><div><ManualEntryCard onUpdate={update}/></div></div></div>}
+      {view === 'tracker' && (
+        <div className="max-w-6xl space-y-8">
+          <TimeTrackerCard activeTimer={activeTimer} onTimerUpdate={onTimerUpdate} onDataRefresh={update} showToast={showToast} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2"><HistoryList trigger={trigger} onUpdate={update} showToast={showToast} /></div>
+            <div><ManualEntryCard onUpdate={update} showToast={showToast} /></div>
+          </div>
+        </div>
+      )}
       
-      {/* NEW SETTINGS VIEW */}
-      {view === 'settings' && <SettingsView user={user} onUpdate={(u) => { setUser({...user, ...u}); localStorage.setItem('timeapp_user', JSON.stringify({...user, ...u})); }} />}
+      {view === 'settings' && <SettingsView user={user} showToast={showToast} onUpdate={(u) => { setUser({...user, ...u}); localStorage.setItem('timeapp_user', JSON.stringify({...user, ...u})); }} />}
       
       {view === 'analytics' && user.role === 'admin' && <AnalyticsView trigger={trigger}/>}
-      {view === 'projects' && user.role === 'admin' && <ProjectsManager/>}
-      {view === 'team' && user.role === 'admin' && <TeamView currentUser={user} />}
+      {view === 'projects' && user.role === 'admin' && <ProjectsManager showToast={showToast}/>}
+      {view === 'team' && user.role === 'admin' && <TeamView currentUser={user} showToast={showToast} />}
       
       {(view !== 'tracker' && view !== 'settings' && user.role !== 'admin') && <div className="flex flex-col items-center justify-center h-96 text-slate-400 glass-panel rounded-3xl"><ShieldAlert size={64} className="mb-4 text-slate-300"/><h3 className="text-xl font-bold text-slate-600">Access Restricted</h3></div>}
     </main>
   );
 }
 
-// --- SETTINGS COMPONENT ---
-function SettingsView({ user, onUpdate }) {
+// --- SETTINGS VIEW (Full Component) ---
+function SettingsView({ user, onUpdate, showToast }) {
   const [profile, setProfile] = useState({ name: user.name, email: user.email });
-  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '' });
+  const [passwords, setPasswords] = useState({ current: '', new: '', confirm: '' });
   
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
     const res = await authFetch('/users/profile', { method: 'PUT', body: JSON.stringify(profile) });
-    if (res.ok) { onUpdate(await res.json()); alert('Profile updated!'); } else alert('Failed to update profile');
+    if (res.ok) { onUpdate(await res.json()); showToast('Profile updated!'); } 
+    else showToast('Failed to update profile', 'error');
   };
 
   const handlePasswordUpdate = async (e) => {
     e.preventDefault();
-    const res = await authFetch('/users/password', { method: 'PUT', body: JSON.stringify(passwords) });
-    if (res.ok) { alert('Password changed!'); setPasswords({ currentPassword: '', newPassword: '' }); } 
-    else alert('Failed to change password. Check current password.');
+    if (passwords.new !== passwords.confirm) return showToast('New passwords do not match!', 'error');
+    if (passwords.new.length < 6) return showToast('Password must be at least 6 chars', 'error');
+    
+    const res = await authFetch('/users/password', { method: 'PUT', body: JSON.stringify({ currentPassword: passwords.current, newPassword: passwords.new }) });
+    if (res.ok) { showToast('Password changed successfully!'); setPasswords({ current: '', new: '', confirm: '' }); } 
+    else showToast('Current password incorrect', 'error');
   };
 
   return (
@@ -357,49 +412,66 @@ function SettingsView({ user, onUpdate }) {
       <div className="glass-panel p-8 rounded-3xl">
         <h3 className="text-xl font-bold text-slate-800 mb-6 flex gap-2"><Lock className="text-indigo-600"/> Change Password</h3>
         <form onSubmit={handlePasswordUpdate} className="space-y-4">
-          <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Current Password</label><PasswordInput value={passwords.currentPassword} onChange={e => setPasswords({...passwords, currentPassword: e.target.value})} /></div>
-          <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">New Password</label><PasswordInput value={passwords.newPassword} onChange={e => setPasswords({...passwords, newPassword: e.target.value})} /></div>
-          <button className="bg-slate-800 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg">Update Password</button>
+          <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Current Password</label><PasswordInput value={passwords.current} onChange={e => setPasswords({...passwords, current: e.target.value})} /></div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">New Password</label><PasswordInput value={passwords.new} onChange={e => setPasswords({...passwords, new: e.target.value})} /></div>
+            <div className="space-y-1"><label className="text-xs font-bold text-slate-400 uppercase">Confirm Password</label><PasswordInput value={passwords.confirm} onChange={e => setPasswords({...passwords, confirm: e.target.value})} /></div>
+          </div>
+          <button className="bg-slate-800 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg hover:bg-slate-900 transition-colors">Update Password</button>
         </form>
       </div>
     </div>
   );
 }
 
-// --- TEAM VIEW (With Delete) ---
-function TeamView({ currentUser }) {
+// --- TEAM VIEW (Full Component) ---
+function TeamView({ currentUser, showToast }) {
   const [users, setUsers] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  
   const loadUsers = () => authFetch('/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : []));
   useEffect(() => { loadUsers(); }, []);
-  const changeRole = async (userId, newRole) => { const res = await authFetch(`/users/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role: newRole }) }); if (res && res.ok) loadUsers(); };
-  const deleteUser = async (userId) => { if (window.confirm("Permanently delete this user? This removes all their time entries and projects.")) { await authFetch(`/users/${userId}`, { method: 'DELETE' }); loadUsers(); } };
+  
+  const changeRole = async (userId, newRole) => { 
+    const res = await authFetch(`/users/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role: newRole }) }); 
+    if (res && res.ok) { loadUsers(); showToast("Role updated"); }
+  };
+  
+  const confirmDelete = async () => { 
+    if(!deleteTarget) return; 
+    const res = await authFetch(`/users/${deleteTarget}`, { method: 'DELETE' }); 
+    if(res.ok) { loadUsers(); showToast("User deleted successfully"); } 
+    else { showToast("Failed to delete user", "error"); } 
+    setDeleteTarget(null); 
+  };
 
   return (
-    <div className="glass-panel rounded-3xl overflow-hidden max-w-5xl">
-      <div className="p-6 border-b border-slate-100 bg-white/50"><h3 className="font-bold text-slate-700">Team Members</h3></div>
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50/50 text-slate-500 font-bold uppercase tracking-wider text-xs"><tr><th className="p-5">Member</th><th className="p-5">Contact</th><th className="p-5">Access Level</th><th className="p-5 text-right">Action</th></tr></thead>
-        <tbody className="divide-y divide-slate-100">
-          {users.map(u => (
-            <tr key={u.id} className="hover:bg-indigo-50/30 transition-colors">
-              <td className="p-5 font-bold text-slate-700 flex items-center gap-3"><span className="text-2xl">{u.avatar}</span> {u.name}</td>
-              <td className="p-5 text-slate-500 font-medium">{u.email}</td>
-              <td className="p-5"><span className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{u.role}</span></td>
-              <td className="p-5 text-right flex justify-end gap-2">
-                {u.id !== currentUser.id && (
-                  <>
-                    <select className="bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold cursor-pointer outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" value={u.role} onChange={(e) => changeRole(u.id, e.target.value)}>
-                      <option value="employee">Employee</option><option value="admin">Admin</option>
-                    </select>
-                    <button onClick={() => deleteUser(u.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={16}/></button>
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="glass-panel rounded-3xl overflow-hidden max-w-5xl">
+        <div className="p-6 border-b border-slate-100 bg-white/50"><h3 className="font-bold text-slate-700">Team Members</h3></div>
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50/50 text-slate-500 font-bold uppercase tracking-wider text-xs"><tr><th className="p-5">Member</th><th className="p-5">Contact</th><th className="p-5">Access Level</th><th className="p-5 text-right">Action</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {users.map(u => (
+              <tr key={u.id} className="hover:bg-indigo-50/30 transition-colors">
+                <td className="p-5 font-bold text-slate-700 flex items-center gap-3"><span className="text-2xl">{u.avatar}</span> {u.name}</td>
+                <td className="p-5 text-slate-500 font-medium">{u.email}</td>
+                <td className="p-5"><span className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase ${u.role === 'admin' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>{u.role}</span></td>
+                <td className="p-5 text-right flex justify-end gap-2">
+                  {u.id !== currentUser.id && (
+                    <>
+                      <select className="bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold cursor-pointer outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" value={u.role} onChange={(e) => changeRole(u.id, e.target.value)}><option value="employee">Employee</option><option value="admin">Admin</option></select>
+                      <button onClick={() => setDeleteTarget(u.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={16}/></button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <ConfirmModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} title="Delete User" message="Are you sure? This will delete the user and all their tracked time entries permanently. Projects they created will be transferred to you." />
+    </>
   );
 }
 
@@ -538,7 +610,10 @@ function AnalyticsView({ trigger }) {
               {projectData.chartData.map((p) => (
                 <div key={p.name} className="chart-grid-row group">
                   <div className="text-sm font-bold text-slate-700 truncate pr-4" title={p.name}>{p.name}</div>
+                  
+                  {/* BAR CONTAINER */}
                   <div className="h-8 bg-slate-100 rounded-lg overflow-hidden flex relative w-full">
+                    {/* SCALED WRAPPER */}
                     <div className="h-full flex" style={{ width: `${(p.total / projectData.maxTotal) * 100}%` }}>
                        {projectData.users.map(u => {
                          const hours = p[u] || 0;
@@ -552,6 +627,7 @@ function AnalyticsView({ trigger }) {
                        })}
                     </div>
                   </div>
+                  
                   <div className="text-right font-bold text-slate-800 text-sm">{p.total.toFixed(1)}h</div>
                 </div>
               ))}
@@ -574,9 +650,12 @@ function AnalyticsView({ trigger }) {
                   {entries.map(e => (
                     <div key={e.project} className="chart-grid-row">
                        <div className="text-sm font-medium text-slate-600 truncate pr-4">{e.project}</div>
+                       
                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
+                          {/* Use Pre-calculated Max to avoid NaN */}
                           <div style={{width: `${Math.min(100, (e.hours / userData[userName].max) * 100)}%`, backgroundColor: stringToColor(e.project)}} className="h-full rounded-full"></div>
                        </div>
+                       
                        <div className="text-right text-xs font-bold text-slate-500">{e.hours.toFixed(1)}h</div>
                     </div>
                   ))}
@@ -589,7 +668,7 @@ function AnalyticsView({ trigger }) {
   );
 }
 
-function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh }) {
+function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh, showToast }) {
   const [projects, setProjects] = useState([]);
   const [proj, setProj] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -616,10 +695,11 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh }) {
       await authFetch('/entries/stop', { method: 'POST' }); 
       onTimerUpdate(null); 
       onDataRefresh(); 
+      showToast("Timer Stopped"); 
     } else { 
       if(!proj) return alert('Select project'); 
       const res = await authFetch('/entries/start', { method: 'POST', body: JSON.stringify({ projectId: proj }) }); 
-      if(res.ok) { onTimerUpdate(await res.json()); } 
+      if(res.ok) { onTimerUpdate(await res.json()); showToast("Timer Started"); } 
     } 
   };
 
@@ -643,10 +723,11 @@ function TimeTrackerCard({ activeTimer, onTimerUpdate, onDataRefresh }) {
   );
 }
 
-function HistoryList({ trigger, onUpdate }) {
+function HistoryList({ trigger, onUpdate, showToast }) {
   const [entries, setEntries] = useState([]);
   const [editingEntry, setEditingEntry] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [deleteId, setDeleteId] = useState(null);
 
   useEffect(() => { 
     authFetch('/entries')
@@ -658,7 +739,11 @@ function HistoryList({ trigger, onUpdate }) {
     if(editingEntry) authFetch('/projects').then(r=>r.json()).then(d => setProjects(Array.isArray(d) ? d : [])); 
   }, [editingEntry]);
 
-  const handleDelete = async (id) => { if(window.confirm('Delete entry?')) { await authFetch(`/entries/${id}`, { method: 'DELETE' }); onUpdate(); } };
+  const confirmDelete = async () => { 
+    const res = await authFetch(`/entries/${deleteId}`, { method: 'DELETE' }); 
+    if(res.ok) { onUpdate(); showToast("Entry deleted"); } 
+    setDeleteId(null); 
+  };
   
   const handleSave = async (e) => { 
     e.preventDefault(); 
@@ -667,6 +752,7 @@ function HistoryList({ trigger, onUpdate }) {
     await authFetch(`/entries/${editingEntry.id}`, { method: 'PUT', body: JSON.stringify({ projectId: editingEntry.project_id, start, end }) }); 
     setEditingEntry(null); 
     onUpdate(); 
+    showToast("Entry updated"); 
   };
 
   const openEdit = (e) => { 
@@ -686,7 +772,7 @@ function HistoryList({ trigger, onUpdate }) {
       <div className="glass-panel rounded-3xl overflow-hidden h-full flex flex-col">
         <div className="p-6 border-b border-slate-100 bg-white/50 flex justify-between items-center"><h3 className="font-bold text-slate-700">Recent Activity</h3><ArrowRight size={18} className="text-slate-400"/></div>
         <div className="overflow-y-auto flex-1 p-2 custom-scrollbar">
-          {entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700">{e.project_name}</div><div className="text-xs text-slate-400 font-medium">{new Date(e.start_time).toLocaleDateString()} • {new Date(e.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => handleDelete(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}
+          {entries.map(e=><div key={e.id} className="p-4 mb-2 rounded-2xl flex justify-between items-center hover:bg-white hover:shadow-md transition-all group"><div className="flex items-center gap-4"><div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md" style={{backgroundColor: stringToColor(e.project_name)}}><Clock size={18}/></div><div><div className="font-bold text-slate-700">{e.project_name}</div><div className="text-xs text-slate-400 font-medium">{new Date(e.start_time).toLocaleDateString()} • {new Date(e.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div></div></div><div className="flex items-center gap-3"><span className="font-mono text-sm font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-200">{Math.round(e.duration_seconds/60)}m</span><div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => openEdit(e)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={16}/></button><button onClick={() => setDeleteId(e.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16}/></button></div></div></div>)}
           {entries.length === 0 && <div className="p-10 text-center text-slate-400">No recent entries.</div>}
         </div>
       </div>
@@ -700,11 +786,12 @@ function HistoryList({ trigger, onUpdate }) {
           </form>
         )}
       </Modal>
+      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={confirmDelete} title="Delete Entry" message="Are you sure you want to delete this time entry?" />
     </>
   );
 }
 
-function ManualEntryCard({ onUpdate }) {
+function ManualEntryCard({ onUpdate, showToast }) {
   const [projects, setProjects] = useState([]);
   const [formData, setFormData] = useState({ projectId: '', date: '', start: '', end: '' });
 
@@ -714,7 +801,11 @@ function ManualEntryCard({ onUpdate }) {
       .then(d => setProjects(Array.isArray(d) ? d : [])); 
   }, []);
 
-  const handleSubmit = async (e) => { e.preventDefault(); await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ projectId: formData.projectId, start: new Date(`${formData.date}T${formData.start}`).toISOString(), end: new Date(`${formData.date}T${formData.end}`).toISOString() }) }); onUpdate(); };
+  const handleSubmit = async (e) => { 
+    e.preventDefault(); 
+    const res = await authFetch('/entries/manual', { method: 'POST', body: JSON.stringify({ projectId: formData.projectId, start: new Date(`${formData.date}T${formData.start}`).toISOString(), end: new Date(`${formData.date}T${formData.end}`).toISOString() }) }); 
+    if(res.ok) { onUpdate(); showToast("Entry added"); } 
+  };
   
   return (
     <div className="glass-panel rounded-3xl p-6 h-full">
@@ -729,24 +820,25 @@ function ManualEntryCard({ onUpdate }) {
   );
 }
 
-function ProjectsManager() {
+function ProjectsManager({ showToast }) {
   const [projects, setProjects] = useState([]);
   const [name, setName] = useState('');
   const [editingProject, setEditingProject] = useState(null);
+  const [deleteId, setDeleteId] = useState(null);
 
   useEffect(() => { refresh(); }, []);
   const refresh = () => authFetch('/projects').then(r=>r.json()).then(d => setProjects(Array.isArray(d) ? d : []));
   
-  const add = async (e) => { e.preventDefault(); await authFetch('/projects', { method:'POST', body:JSON.stringify({name, color:'#333'}) }); setName(''); refresh(); };
-  const del = async (id) => { if(window.confirm('Delete project?')) { await authFetch(`/projects/${id}`, { method: 'DELETE' }); refresh(); } };
-  const handleSave = async (e) => { e.preventDefault(); await authFetch(`/projects/${editingProject.id}`, { method: 'PUT', body: JSON.stringify({ name: editingProject.name, color: editingProject.color }) }); setEditingProject(null); refresh(); };
+  const add = async (e) => { e.preventDefault(); const res = await authFetch('/projects', { method:'POST', body:JSON.stringify({name, color:'#333'}) }); if(res.ok) { setName(''); refresh(); showToast("Project created"); } };
+  const confirmDelete = async () => { const res = await authFetch(`/projects/${deleteId}`, { method: 'DELETE' }); if(res.ok) { refresh(); showToast("Project deleted"); } setDeleteId(null); };
+  const handleSave = async (e) => { e.preventDefault(); const res = await authFetch(`/projects/${editingProject.id}`, { method: 'PUT', body: JSON.stringify({ name: editingProject.name, color: editingProject.color }) }); if(res.ok) { setEditingProject(null); refresh(); showToast("Project updated"); } };
   
   return (
     <>
       <div className="glass-panel p-8 rounded-3xl max-w-4xl">
         <h3 className="font-bold text-slate-700 mb-6 text-xl">Projects</h3>
         <form onSubmit={add} className="flex gap-4 mb-8"><input value={name} onChange={e=>setName(e.target.value)} className="glass-input p-4 rounded-xl w-full font-bold outline-none" placeholder="New project name..." /><button className="bg-indigo-600 text-white px-8 rounded-xl font-bold shadow-lg shadow-indigo-200">Create</button></form>
-        <div className="grid gap-3">{projects.map(p=><div key={p.id} className="p-4 rounded-xl bg-white border border-slate-100 flex justify-between items-center group hover:shadow-md transition-all"><span className="font-bold text-slate-700">{p.name}</span><div className="flex gap-2"><button onClick={() => setEditingProject(p)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button><button onClick={() => del(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button></div></div>)}</div>
+        <div className="grid gap-3">{projects.map(p=><div key={p.id} className="p-4 rounded-xl bg-white border border-slate-100 flex justify-between items-center group hover:shadow-md transition-all"><span className="font-bold text-slate-700">{p.name}</span><div className="flex gap-2"><button onClick={() => setEditingProject(p)} className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"><Edit2 size={18}/></button><button onClick={() => setDeleteId(p.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={18}/></button></div></div>)}</div>
       </div>
       <Modal isOpen={!!editingProject} onClose={() => setEditingProject(null)} title="Edit Project">
         {editingProject && (
@@ -756,6 +848,7 @@ function ProjectsManager() {
           </form>
         )}
       </Modal>
+      <ConfirmModal isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={confirmDelete} title="Delete Project" message="Are you sure? This will delete the project and ALL associated time entries." />
     </>
   );
 }
